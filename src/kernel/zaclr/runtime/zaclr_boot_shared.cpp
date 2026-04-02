@@ -1,0 +1,16 @@
+#include <kernel/zaclr/runtime/zaclr_boot_shared.h>
+
+namespace
+{
+    static int32_t s_boot_part_lba = 0;
+}
+
+extern "C" void zaclr_boot_shared_set_boot_part_lba(int32_t value)
+{
+    s_boot_part_lba = value;
+}
+
+extern "C" int32_t zaclr_boot_shared_get_boot_part_lba(void)
+{
+    return s_boot_part_lba;
+}

@@ -1,0 +1,36 @@
+# Zapada - .gitignore
+
+# Build artifacts
+build/
+*.o
+*.elf
+*.iso
+*.qcow2
+.*/
+!.gitignore
+/CLONES/**
+/diag/**
+/docs/**
+/examples/**
+/plans/**
+/isoroot/**
+/dotnet/**
+/**/bin/**
+/**/obj/**
+/**/Debug/**
+/**/Release/**
+/**/publish/**
+# GRUB ISO staging: the ELF copy placed before mkrescue runs
+isoroot/boot/Zapada.elf
+
+# Serial log output
+*.log
+
+# VS Code local settings (keep tasks and launch tracked)
+.vscode/settings.json
+.vscode/c_cpp_properties.json
+
+# OS junk
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>System.Private.CoreLib</AssemblyName>
+    <RootNamespace>System</RootNamespace>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+    <RuntimeMetadataVersion>v4.0.30319</RuntimeMetadataVersion>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <LangVersion>preview</LangVersion>
+    <DefineConstants>$(DefineConstants);TARGET_64BIT;TARGET_AMD64</DefineConstants>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="System/Math.DivModInt.cs" />
+    <Compile Include="System/Runtime/GCFrameRegistration.cs" />
+    <Compile Include="System/Diagnostics/StackTraceHiddenAttribute.cs" />
+    <Compile Include="System\CoreLib.cs" />
+    <Compile Include="System\Diagnostics\Debug.cs" />
+    <Compile Include="System\Runtime\CompilerServices\IndexerNameAttribute.cs" />
+    <Compile Include="Minimal/**/*.cs" />
+  </ItemGroup>
+</Project>

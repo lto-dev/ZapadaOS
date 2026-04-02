@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Zapada.Conformance</AssemblyName>
+    <RootNamespace>Zapada.Conformance</RootNamespace>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Zapada.Conformance.CrossAsm\Zapada.Conformance.CrossAsm.csproj" />
+  </ItemGroup>
+</Project>

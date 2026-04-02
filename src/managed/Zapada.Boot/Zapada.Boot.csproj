@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      Phase 3A Part 3: Zapada.Boot managed assembly.
+      Compiled to .NET 9 IL and embedded in the kernel binary.
+
+      OutputType=Exe: ensures the CLI Entry Point token is set so
+      clr_execute_entry_point() can locate Main() in the PE metadata.
+
+      AllowUnsafeBlocks=false: all code must be pure managed C#.
+      No unsafe pointers, no fixed buffers.
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Optimize>true</Optimize>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Zapada.Storage/Zapada.Storage.csproj" />
+    <ProjectReference Include="../Zapada.Fs.Vfs/Zapada.Fs.Vfs.csproj" />
+  </ItemGroup>
+</Project>

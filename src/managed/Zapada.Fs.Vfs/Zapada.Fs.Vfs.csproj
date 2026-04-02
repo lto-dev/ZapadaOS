@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Zapada.Fs.Vfs</AssemblyName>
+    <RootNamespace>Zapada.Fs.Vfs</RootNamespace>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <!-- Phase 3/6 redesign: VFS depends on storage abstractions only. -->
+  <ItemGroup>
+    <ProjectReference Include="../Zapada.Storage/Zapada.Storage.csproj" />
+  </ItemGroup>
+</Project>
