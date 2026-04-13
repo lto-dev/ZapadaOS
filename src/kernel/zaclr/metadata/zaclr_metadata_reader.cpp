@@ -2,6 +2,10 @@
 
 #include <kernel/support/kernel_memory.h>
 
+extern "C" {
+#include <kernel/console.h>
+}
+
 namespace {
 
 static uint16_t read_u16(const uint8_t* p)
@@ -164,7 +168,7 @@ static uint32_t table_row_size(const struct zaclr_metadata_reader* reader, uint3
         case 0x25u: return 4u + table_index_size(reader, 0x23u) + table_index_size(reader, 0x23u);
         case 0x26u: return 4u + str_w + blob_w;
         case 0x27u: return 4u + 4u + str_w + str_w + coded_index_size(reader, implementation_tables, 3u, 2u);
-        case 0x28u: return 4u + str_w + coded_index_size(reader, implementation_tables, 3u, 2u);
+        case 0x28u: return 4u + 4u + str_w + coded_index_size(reader, implementation_tables, 3u, 2u);
         case 0x29u: return table_index_size(reader, 0x02u) + table_index_size(reader, 0x02u);
         case 0x2Au: return 2u + 2u + coded_index_size(reader, type_or_method_def_tables, 2u, 1u) + str_w;
         case 0x2Bu: return coded_index_size(reader, method_def_or_ref_tables, 2u, 1u) + blob_w;
@@ -214,6 +218,18 @@ static struct zaclr_result parse_tilde_stream(struct zaclr_metadata_reader* read
         row_size = table_row_size(reader, table);
         if (row_size == 0u && reader->row_counts[table] != 0u) {
             return bad_metadata();
+        }
+
+        {
+            console_write("[ZACLR][metadata] table=");
+            console_write_hex64((uint64_t)table);
+            console_write(" rows=");
+            console_write_dec((uint64_t)reader->row_counts[table]);
+            console_write(" row_size=");
+            console_write_dec((uint64_t)row_size);
+            console_write(" offset=");
+            console_write_dec((uint64_t)(table_ptr - ts));
+            console_write("\n");
         }
 
         bytes_required = row_size * reader->row_counts[table];
@@ -658,6 +674,27 @@ extern "C" struct zaclr_result zaclr_metadata_reader_get_methodspec_row(const st
     }
 
     p = table->rows + (row_1based - 1u) * table->row_size;
+    if (row_1based >= 0x178u && row_1based <= 0x17Cu)
+    {
+        const uint8_t* raw = p;
+        console_write("[ZACLR][metadata] MethodSpec row 0x");
+        console_write_hex64((uint64_t)row_1based);
+        console_write(" row_size=");
+        console_write_dec((uint64_t)table->row_size);
+        console_write(" addr=");
+        console_write_hex64((uint64_t)(uintptr_t)raw);
+        console_write(" base=");
+        console_write_hex64((uint64_t)(uintptr_t)table->rows);
+        console_write(" tilde=");
+        console_write_hex64((uint64_t)(uintptr_t)reader->tilde_stream.data);
+        console_write(" bytes=");
+        for (uint32_t i = 0u; i < table->row_size && i < 8u; ++i)
+        {
+            console_write_hex64((uint64_t)raw[i]);
+            console_write(i + 1u < table->row_size && i + 1u < 8u ? " " : "");
+        }
+        console_write("\n");
+    }
     if (coded_index_size(reader, method_def_or_ref_tables, 2u, 1u) == 4u) {
         row->method_coded_index = read_u32(p); p += 4u;
     } else {

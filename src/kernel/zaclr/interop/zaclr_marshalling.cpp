@@ -3,6 +3,7 @@
 #include <kernel/zaclr/diag/zaclr_trace_events.h>
 #include <kernel/zaclr/include/zaclr_trace.h>
 #include <kernel/zaclr/heap/zaclr_array.h>
+#include <kernel/zaclr/heap/zaclr_object.h>
 #include <kernel/zaclr/heap/zaclr_string.h>
 #include <kernel/zaclr/metadata/zaclr_method_map.h>
 #include <kernel/zaclr/interop/zaclr_internal_call_registry.h>
@@ -19,16 +20,40 @@ namespace
     {
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
     }
+}
 
-    static struct zaclr_stack_value* resolve_byref_target(struct zaclr_stack_value* value)
+extern "C" struct zaclr_stack_value* zaclr_native_call_frame_resolve_byref_target(struct zaclr_native_call_frame* frame,
+                                                                                     uint32_t index)
+{
+    struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
+
+    if (arg == NULL)
     {
-        if (value == NULL || value->kind != ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+        return NULL;
+    }
+
+    if (arg->kind == ZACLR_STACK_VALUE_BYREF)
+    {
+        return (arg->flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) != 0u
+            ? (struct zaclr_stack_value*)(uintptr_t)arg->data.raw
+            : NULL;
+    }
+
+    if (arg->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+    {
+        if (frame != NULL && frame->caller_frame != NULL)
         {
-            return NULL;
+            uint32_t local_index = (uint32_t)arg->data.raw;
+            if (local_index < frame->caller_frame->local_count)
+            {
+                return &frame->caller_frame->locals[local_index];
+            }
         }
 
-        return (struct zaclr_stack_value*)(uintptr_t)value->data.raw;
+        return (struct zaclr_stack_value*)(uintptr_t)arg->data.raw;
     }
+
+    return NULL;
 }
 
 extern "C" uint8_t zaclr_native_call_frame_argument_count(const struct zaclr_native_call_frame* frame)
@@ -109,6 +134,26 @@ extern "C" struct zaclr_result zaclr_native_call_frame_arg_i8(struct zaclr_nativ
         return zaclr_result_ok();
     }
 
+    if (value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE && frame->runtime != NULL)
+    {
+        const struct zaclr_object_desc* object = value->data.object_reference;
+        const struct zaclr_boxed_value_desc* boxed_value = (const struct zaclr_boxed_value_desc*)object;
+        if (boxed_value != NULL && (zaclr_object_flags(&boxed_value->object) & ZACLR_OBJECT_FLAG_BOXED_VALUE) != 0u)
+        {
+            if (boxed_value->value.kind == ZACLR_STACK_VALUE_I8)
+            {
+                *out_value = boxed_value->value.data.i8;
+                return zaclr_result_ok();
+            }
+
+            if (boxed_value->value.kind == ZACLR_STACK_VALUE_I4)
+            {
+                *out_value = boxed_value->value.data.i4;
+                return zaclr_result_ok();
+            }
+        }
+    }
+
     return invalid_arg();
 }
 
@@ -132,7 +177,7 @@ extern "C" struct zaclr_result zaclr_native_call_frame_arg_object(struct zaclr_n
                                                                     zaclr_object_handle* out_value)
 {
     struct zaclr_stack_value* value = zaclr_native_call_frame_arg(frame, index);
-    if (value == NULL || out_value == NULL || value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (value == NULL || out_value == NULL || value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         if (frame != NULL && frame->runtime != NULL)
         {
@@ -160,7 +205,9 @@ extern "C" struct zaclr_result zaclr_native_call_frame_arg_object(struct zaclr_n
         return invalid_arg();
     }
 
-    *out_value = value->data.object_handle;
+    *out_value = frame != NULL && frame->runtime != NULL
+        ? zaclr_heap_get_object_handle(&frame->runtime->heap, value->data.object_reference)
+        : 0u;
     return zaclr_result_ok();
 }
 
@@ -198,17 +245,7 @@ extern "C" struct zaclr_result zaclr_native_call_frame_load_byref_i4(struct zacl
                                                                        uint32_t index,
                                                                        int32_t* out_value)
 {
-    struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
-    struct zaclr_stack_value* target = resolve_byref_target(arg);
-
-    if (target == NULL && frame != NULL && frame->caller_frame != NULL && arg != NULL && arg->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
-    {
-        uint32_t local_index = (uint32_t)arg->data.raw;
-        if (local_index < frame->caller_frame->local_count)
-        {
-            target = &frame->caller_frame->locals[local_index];
-        }
-    }
+    struct zaclr_stack_value* target = zaclr_native_call_frame_resolve_byref_target(frame, index);
 
     if (target == NULL || out_value == NULL)
     {
@@ -234,17 +271,7 @@ extern "C" struct zaclr_result zaclr_native_call_frame_store_byref_i4(struct zac
                                                                          uint32_t index,
                                                                          int32_t value)
 {
-    struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
-    struct zaclr_stack_value* target = resolve_byref_target(arg);
-
-    if (target == NULL && frame != NULL && frame->caller_frame != NULL && arg != NULL && arg->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
-    {
-        uint32_t local_index = (uint32_t)arg->data.raw;
-        if (local_index < frame->caller_frame->local_count)
-        {
-            target = &frame->caller_frame->locals[local_index];
-        }
-    }
+    struct zaclr_stack_value* target = zaclr_native_call_frame_resolve_byref_target(frame, index);
 
     if (target == NULL)
     {
@@ -261,17 +288,7 @@ extern "C" struct zaclr_result zaclr_native_call_frame_load_byref_i8(struct zacl
                                                                        uint32_t index,
                                                                        int64_t* out_value)
 {
-    struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
-    struct zaclr_stack_value* target = resolve_byref_target(arg);
-
-    if (target == NULL && frame != NULL && frame->caller_frame != NULL && arg != NULL && arg->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
-    {
-        uint32_t local_index = (uint32_t)arg->data.raw;
-        if (local_index < frame->caller_frame->local_count)
-        {
-            target = &frame->caller_frame->locals[local_index];
-        }
-    }
+    struct zaclr_stack_value* target = zaclr_native_call_frame_resolve_byref_target(frame, index);
 
     if (target == NULL || out_value == NULL)
     {
@@ -297,17 +314,7 @@ extern "C" struct zaclr_result zaclr_native_call_frame_store_byref_i8(struct zac
                                                                         uint32_t index,
                                                                         int64_t value)
 {
-    struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
-    struct zaclr_stack_value* target = resolve_byref_target(arg);
-
-    if (target == NULL && frame != NULL && frame->caller_frame != NULL && arg != NULL && arg->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
-    {
-        uint32_t local_index = (uint32_t)arg->data.raw;
-        if (local_index < frame->caller_frame->local_count)
-        {
-            target = &frame->caller_frame->locals[local_index];
-        }
-    }
+    struct zaclr_stack_value* target = zaclr_native_call_frame_resolve_byref_target(frame, index);
 
     if (target == NULL)
     {
@@ -324,24 +331,16 @@ extern "C" struct zaclr_result zaclr_native_call_frame_load_byref_object(struct 
                                                                            uint32_t index,
                                                                            zaclr_object_handle* out_value)
 {
-    struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
-    struct zaclr_stack_value* target = resolve_byref_target(arg);
+    struct zaclr_stack_value* target = zaclr_native_call_frame_resolve_byref_target(frame, index);
 
-    if (target == NULL && frame != NULL && frame->caller_frame != NULL && arg != NULL && arg->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
-    {
-        uint32_t local_index = (uint32_t)arg->data.raw;
-        if (local_index < frame->caller_frame->local_count)
-        {
-            target = &frame->caller_frame->locals[local_index];
-        }
-    }
-
-    if (target == NULL || out_value == NULL || target->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (target == NULL || out_value == NULL || target->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return invalid_arg();
     }
 
-    *out_value = target->data.object_handle;
+    *out_value = frame != NULL && frame->runtime != NULL
+        ? zaclr_heap_get_object_handle(&frame->runtime->heap, target->data.object_reference)
+        : 0u;
     return zaclr_result_ok();
 }
 
@@ -349,26 +348,18 @@ extern "C" struct zaclr_result zaclr_native_call_frame_store_byref_object(struct
                                                                             uint32_t index,
                                                                             zaclr_object_handle value)
 {
-    struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
-    struct zaclr_stack_value* target = resolve_byref_target(arg);
-
-    if (target == NULL && frame != NULL && frame->caller_frame != NULL && arg != NULL && arg->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
-    {
-        uint32_t local_index = (uint32_t)arg->data.raw;
-        if (local_index < frame->caller_frame->local_count)
-        {
-            target = &frame->caller_frame->locals[local_index];
-        }
-    }
+    struct zaclr_stack_value* target = zaclr_native_call_frame_resolve_byref_target(frame, index);
 
     if (target == NULL)
     {
         return invalid_arg();
     }
 
-    target->kind = ZACLR_STACK_VALUE_OBJECT_HANDLE;
+    target->kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
     target->reserved = 0u;
-    target->data.object_handle = value;
+    target->data.object_reference = frame != NULL && frame->runtime != NULL
+        ? zaclr_heap_get_object(&frame->runtime->heap, value)
+        : NULL;
     return zaclr_result_ok();
 }
 
@@ -430,8 +421,10 @@ extern "C" struct zaclr_result zaclr_native_call_frame_set_object(struct zaclr_n
 
     frame->has_result = 1u;
     frame->result_value = {};
-    frame->result_value.kind = ZACLR_STACK_VALUE_OBJECT_HANDLE;
-    frame->result_value.data.object_handle = value;
+    frame->result_value.kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+    frame->result_value.data.object_reference = frame->runtime != NULL
+        ? zaclr_heap_get_object(&frame->runtime->heap, value)
+        : NULL;
     return zaclr_result_ok();
 }
 

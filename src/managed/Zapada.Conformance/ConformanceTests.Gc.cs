@@ -238,6 +238,7 @@ internal static partial class ConformanceTests
         else
             Fail("[FAIL] WeakGCHandle target visible while alive");
 
+        targetBeforeCollect = null;
         value = null;
         InternalCalls.GcCollect();
 

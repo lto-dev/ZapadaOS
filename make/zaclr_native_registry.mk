@@ -18,7 +18,7 @@ ZACLR_NATIVE_LIBRARY_OBJECTS_AA64 := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR_AA6
 ZACLR_GENERATED_ARTIFACTS := $(ZACLR_NATIVE_REGISTRY_CPP) $(ZACLR_NATIVE_REGISTRY_HEADERS) $(ZACLR_NATIVE_REGISTRY_PER_LIBRARY_CPP) $(ZACLR_OPCODE_TABLE_INC) $(ZACLR_OPCODE_DESC_INC) $(ZACLR_TRACE_EVENTS_INC)
 ZACLR_GENERATED_CPP_SOURCES := $(ZACLR_NATIVE_REGISTRY_CPP) $(ZACLR_NATIVE_REGISTRY_PER_LIBRARY_CPP)
 
-$(ZACLR_GENERATED_DIR)/%/zaclr_native_registry.h: Makefile make/zaclr_native_registry.mk | $(BUILD_DIR)
+$(ZACLR_GENERATED_DIR)/%/zaclr_native_registry.h: Makefile make/zaclr_native_registry.mk $(wildcard $(LIBRARIES_DIR)/%/zaclr_native_*.h) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	@library_name='$*'; \
 		source_dir='$(LIBRARIES_DIR)/'$${library_name}; \
@@ -51,7 +51,7 @@ $(ZACLR_GENERATED_DIR)/%/zaclr_native_registry.h: Makefile make/zaclr_native_reg
 		echo '' >> $@; \
 		echo '#endif /* ZACLR_GENERATED_NATIVE_REGISTRY_H */' >> $@
 
-$(ZACLR_GENERATED_DIR)/%/zaclr_native_registry.cpp: Makefile make/zaclr_native_registry.mk $(ZACLR_GENERATED_DIR)/%/zaclr_native_registry.h scripts/generate_zaclr_native_registry.py | $(BUILD_DIR)
+$(ZACLR_GENERATED_DIR)/%/zaclr_native_registry.cpp: Makefile make/zaclr_native_registry.mk $(wildcard $(LIBRARIES_DIR)/%/zaclr_native_*.h) $(ZACLR_GENERATED_DIR)/%/zaclr_native_registry.h scripts/generate_zaclr_native_registry.py | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	@python3 $(CURDIR)/scripts/generate_zaclr_native_registry.py '$*' '$(LIBRARIES_DIR)/$*' '$@'
 

@@ -30,7 +30,18 @@ extern "C" void zaclr_runtime_reset(struct zaclr_runtime* runtime)
     runtime->loader = {};
     runtime->assemblies = {};
     runtime->internal_calls = {};
+    runtime->qcall_table = {};
     runtime->heap = {};
     runtime->engine = {};
     runtime->boot_launch = {};
+}
+
+extern "C" struct zaclr_app_domain* zaclr_runtime_current_domain(struct zaclr_runtime* runtime)
+{
+    if (runtime == NULL)
+    {
+        return NULL;
+    }
+
+    return &runtime->boot_launch.domain;
 }

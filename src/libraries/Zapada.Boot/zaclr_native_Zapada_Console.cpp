@@ -30,7 +30,7 @@ struct zaclr_result zaclr_native_Zapada_Console::Write___STATIC__VOID__STRING(st
         return zaclr_native_call_frame_set_void(&frame);
     }
 
-    text = zaclr_string_chars_from_handle(&frame.runtime->heap, string_handle);
+    text = zaclr_string_ascii_chars_from_handle(&frame.runtime->heap, string_handle);
     if (text == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);

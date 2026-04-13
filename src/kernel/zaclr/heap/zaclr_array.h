@@ -11,10 +11,10 @@ extern "C" {
 
 struct zaclr_array_desc {
     struct zaclr_object_desc object;
-    struct zaclr_token element_type;
+    int32_t length;
     uint32_t element_size;
-    uint32_t length;
-    uint32_t data_size;
+    uint32_t reserved;
+    struct zaclr_token element_type;
 };
 
 struct zaclr_result zaclr_array_allocate(struct zaclr_heap* heap,
@@ -22,7 +22,13 @@ struct zaclr_result zaclr_array_allocate(struct zaclr_heap* heap,
                                          struct zaclr_token element_type,
                                          uint32_t element_size,
                                          uint32_t length,
-                                         zaclr_object_handle* out_handle);
+                                         struct zaclr_array_desc** out_array);
+struct zaclr_result zaclr_array_allocate_handle(struct zaclr_heap* heap,
+                                                zaclr_type_id type_id,
+                                                struct zaclr_token element_type,
+                                                uint32_t element_size,
+                                                uint32_t length,
+                                                zaclr_object_handle* out_handle);
 struct zaclr_array_desc* zaclr_array_from_handle(struct zaclr_heap* heap,
                                                  zaclr_object_handle handle);
 const struct zaclr_array_desc* zaclr_array_from_handle_const(const struct zaclr_heap* heap,

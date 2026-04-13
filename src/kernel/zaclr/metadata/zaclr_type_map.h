@@ -26,7 +26,8 @@ struct zaclr_type_desc {
 
 enum zaclr_type_runtime_flags {
     ZACLR_TYPE_RUNTIME_FLAG_NONE = 0x00000000u,
-    ZACLR_TYPE_RUNTIME_FLAG_HAS_FINALIZER = 0x00000001u
+    ZACLR_TYPE_RUNTIME_FLAG_HAS_FINALIZER = 0x00000001u,
+    ZACLR_TYPE_RUNTIME_FLAG_HAS_COMPONENT_SIZE = 0x00000002u
 };
 
 struct zaclr_type_map {

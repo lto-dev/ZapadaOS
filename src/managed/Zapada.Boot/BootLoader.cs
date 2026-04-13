@@ -62,41 +62,18 @@ namespace Zapada.Boot
             /* Conformance: CLR correctness tests — run FIRST.              */
             /* ------------------------------------------------------------ */
 
-            int confSlot = Zapada.Runtime.InternalCalls.RuntimeFindByName("Zapada.Conformance");
-            if (confSlot < 0)
+            System.Console.Write("[Boot] loading: Zapada.Conformance\n");
+            if (Zapada.Conformance.DllMain.Initialize() != 0)
             {
-                System.Console.Write("[Boot] Zapada.Conformance not pre-loaded\n");
-            }
-            else
-            {
-                System.Console.Write("[Boot] found: Zapada.Conformance\n");
-                System.Console.Write("[Boot] Zapada.Conformance loaded\n");
-
-                int confInit = Zapada.Runtime.InternalCalls.RuntimeCallMethod(
-                    "Zapada.Conformance.DllMain", "Initialize", confSlot);
-                if (confInit == 0)
-                {
-                    System.Console.Write("[Boot] Conformance Initialize failed\n");
-                }
+                System.Console.Write("[Boot] Conformance Initialize failed\n");
             }
 
             /* ============================================================== */
             /* Phase 1: Storage abstractions                                  */
             /* ============================================================== */
 
-            int storageSlot = Zapada.Runtime.InternalCalls.RuntimeFindByName("Zapada.Storage");
-            if (storageSlot < 0)
-            {
-                System.Console.Write("[Boot] Zapada.Storage not pre-loaded\n");
-                System.Console.Write("[Gate] GateD\n");
-                return;
-            }
-            System.Console.Write("[Boot] found: Zapada.Storage\n");
-            System.Console.Write("[Boot] Zapada.Storage loaded\n");
-
-            int storageInit = Zapada.Runtime.InternalCalls.RuntimeCallMethod(
-                "Zapada.Storage.DllMain", "Initialize", storageSlot);
-            if (storageInit == 0)
+            System.Console.Write("[Boot] loading: Zapada.Storage\n");
+            if (Zapada.Storage.DllMain.Initialize() != 0)
             {
                 System.Console.Write("[Boot] Storage Initialize failed\n");
             }
@@ -122,108 +99,47 @@ namespace Zapada.Boot
             /* Step 3a: find and invoke TEST.DLL (Zapada.Test.Hello).       */
             /* ------------------------------------------------------------ */
 
-            int testSlot = Zapada.Runtime.InternalCalls.RuntimeFindByName("Zapada.Test.Hello");
-            if (testSlot < 0)
-            {
-                System.Console.Write("[Boot] Zapada.Test.Hello not pre-loaded\n");
-            }
-            else
-            {
-                System.Console.Write("[Boot] invoking: Zapada.Test.Hello\n");
-                int callResult = Zapada.Runtime.InternalCalls.RuntimeCallMethod(
-                    "Zapada.Test.Hello.Hello", "Run", testSlot);
-                if (callResult == 0)
-                {
-                    System.Console.Write("[Boot] RuntimeCallMethod failed\n");
-                }
-            }
+            System.Console.Write("[Boot] invoking: Zapada.Test.Hello\n");
+            Zapada.Test.Hello.Hello.Run();
 
             /* ------------------------------------------------------------ */
             /* Step D.1: initialize VirtioBlock driver.                     */
             /* ------------------------------------------------------------ */
 
-            int vblkSlot = Zapada.Runtime.InternalCalls.RuntimeFindByName("Zapada.Drivers.VirtioBlock");
-            if (vblkSlot < 0)
+            System.Console.Write("[Boot] loading: Zapada.Drivers.VirtioBlock\n");
+            if (Zapada.Drivers.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] Zapada.Drivers.VirtioBlock not pre-loaded\n");
-            }
-            else
-            {
-                System.Console.Write("[Boot] found: Zapada.Drivers.VirtioBlock\n");
-                System.Console.Write("[Boot] Zapada.Drivers.VirtioBlock loaded\n");
-
-                int vblkInit = Zapada.Runtime.InternalCalls.RuntimeCallMethod(
-                    "Zapada.Drivers.DllMain", "Initialize", vblkSlot);
-                if (vblkInit == 0)
-                {
-                    System.Console.Write("[Boot] VBLK Initialize failed\n");
-                }
+                System.Console.Write("[Boot] VBLK Initialize failed\n");
             }
 
             /* ------------------------------------------------------------ */
             /* Step D.2: initialize GPT driver.                             */
             /* ------------------------------------------------------------ */
 
-            int gptSlot = Zapada.Runtime.InternalCalls.RuntimeFindByName("Zapada.Fs.Gpt");
-            if (gptSlot < 0)
+            System.Console.Write("[Boot] loading: Zapada.Fs.Gpt\n");
+            if (Zapada.Fs.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] Zapada.Fs.Gpt not pre-loaded\n");
-            }
-            else
-            {
-                System.Console.Write("[Boot] found: Zapada.Fs.Gpt\n");
-                System.Console.Write("[Boot] Zapada.Fs.Gpt loaded\n");
-
-                int gptInit = Zapada.Runtime.InternalCalls.RuntimeCallMethod(
-                    "Zapada.Fs.DllMain", "Initialize", gptSlot);
-                if (gptInit == 0)
-                {
-                    System.Console.Write("[Boot] GPT Initialize failed\n");
-                }
+                System.Console.Write("[Boot] GPT Initialize failed\n");
             }
 
             /* ------------------------------------------------------------ */
             /* Step D.3: initialize managed FAT32 driver.                   */
             /* ------------------------------------------------------------ */
 
-            int fat32Slot = Zapada.Runtime.InternalCalls.RuntimeFindByName("Zapada.Fs.Fat32");
-            if (fat32Slot < 0)
+            System.Console.Write("[Boot] loading: Zapada.Fs.Fat32\n");
+            if (Zapada.Fs.Fat32.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] Zapada.Fs.Fat32 not pre-loaded\n");
-            }
-            else
-            {
-                System.Console.Write("[Boot] found: Zapada.Fs.Fat32\n");
-                System.Console.Write("[Boot] Zapada.Fs.Fat32 loaded\n");
-
-                int fat32Init = Zapada.Runtime.InternalCalls.RuntimeCallMethod(
-                    "Zapada.Fs.Fat32.DllMain", "Initialize", fat32Slot);
-                if (fat32Init == 0)
-                {
-                    System.Console.Write("[Boot] FAT32 Initialize failed\n");
-                }
+                System.Console.Write("[Boot] FAT32 Initialize failed\n");
             }
 
             /* ------------------------------------------------------------ */
             /* Step D.4: initialize managed VFS layer.                      */
             /* ------------------------------------------------------------ */
 
-            int vfsSlot = Zapada.Runtime.InternalCalls.RuntimeFindByName("Zapada.Fs.Vfs");
-            if (vfsSlot < 0)
+            System.Console.Write("[Boot] loading: Zapada.Fs.Vfs\n");
+            if (Zapada.Fs.Vfs.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] Zapada.Fs.Vfs not pre-loaded\n");
-            }
-            else
-            {
-                System.Console.Write("[Boot] found: Zapada.Fs.Vfs\n");
-                System.Console.Write("[Boot] Zapada.Fs.Vfs loaded\n");
-
-                int vfsInit = Zapada.Runtime.InternalCalls.RuntimeCallMethod(
-                    "Zapada.Fs.Vfs.DllMain", "Initialize", vfsSlot);
-                if (vfsInit == 0)
-                {
-                    System.Console.Write("[Boot] VFS Initialize failed\n");
-                }
+                System.Console.Write("[Boot] VFS Initialize failed\n");
             }
 
             /* ============================================================== */

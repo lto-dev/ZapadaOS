@@ -24,6 +24,9 @@ struct zaclr_result zaclr_build_native_call_frame(struct zaclr_runtime* runtime,
                                                   struct zaclr_stack_value* arguments,
                                                   struct zaclr_native_call_frame* frame);
 
+struct zaclr_stack_value* zaclr_native_call_frame_resolve_byref_target(struct zaclr_native_call_frame* frame,
+                                                                       uint32_t index);
+
 struct zaclr_result zaclr_invoke_internal_call(struct zaclr_native_call_frame* frame,
                                                const struct zaclr_native_bind_method* method);
 

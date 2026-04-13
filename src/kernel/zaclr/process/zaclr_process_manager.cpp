@@ -1,5 +1,7 @@
 #include <kernel/zaclr/process/zaclr_process_manager.h>
 
+#include <kernel/zaclr/loader/zaclr_assembly_source_initramfs.h>
+
 extern "C" struct zaclr_result zaclr_process_manager_initialize(struct zaclr_process_manager* manager)
 {
     if (manager == NULL)
@@ -75,6 +77,13 @@ extern "C" struct zaclr_result zaclr_process_manager_create_boot_launch(struct z
     launch_state->domain.process = launch_state->process.id;
     launch_state->domain.assemblies = manager->next_assembly_set_id++;
     launch_state->domain.type_statics = manager->next_type_static_map_id++;
+    result = zaclr_assembly_registry_initialize(&launch_state->domain.registry);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    launch_state->domain.source = (struct zaclr_assembly_source*)zaclr_assembly_source_initramfs();
     launch_state->domain.flags = 0u;
 
     launch_state->thread.id = manager->next_thread_id++;

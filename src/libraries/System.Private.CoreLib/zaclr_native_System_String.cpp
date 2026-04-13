@@ -18,13 +18,23 @@ namespace
                                                     struct zaclr_native_call_frame& frame)
     {
         zaclr_object_handle handle;
-        struct zaclr_result status = zaclr_string_allocate_utf16(&runtime->heap, text, length, &handle);
+        struct zaclr_result status = zaclr_string_allocate_utf16_handle(&runtime->heap, text, length, &handle);
         if (status.status != ZACLR_STATUS_OK)
         {
             return status;
         }
 
         return zaclr_native_call_frame_set_string(&frame, handle);
+    }
+
+    static zaclr_object_handle stack_object_handle(struct ::zaclr_runtime* runtime, const struct zaclr_stack_value* value)
+    {
+        if (runtime == NULL || value == NULL || value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+        {
+            return 0u;
+        }
+
+        return zaclr_heap_get_object_handle(&runtime->heap, value->data.object_reference);
     }
 
     static bool string_starts_with(const struct zaclr_string_desc* text, const struct zaclr_string_desc* prefix)
@@ -246,7 +256,7 @@ struct zaclr_result zaclr_native_System_String::get_Length___I4(struct zaclr_nat
     console_write(" this_ptr=0x");
     console_write_hex64((uint64_t)(uintptr_t)this_value);
     console_write("\n");
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
@@ -254,10 +264,10 @@ struct zaclr_result zaclr_native_System_String::get_Length___I4(struct zaclr_nat
     console_write("[ZACLR][interop] System.String.get_Length this_kind=");
     console_write_dec((uint64_t)this_value->kind);
     console_write(" handle=");
-    console_write_dec((uint64_t)this_value->data.object_handle);
+    console_write_dec((uint64_t)stack_object_handle(frame.runtime, this_value));
     console_write("\n");
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     console_write("[ZACLR][interop] System.String.get_Length resolved\n");
     return zaclr_native_call_frame_set_i4(&frame, value != NULL ? (int32_t)zaclr_string_length(value) : 0);
 }
@@ -269,12 +279,12 @@ struct zaclr_result zaclr_native_System_String::get_Chars___CHAR__I4(struct zacl
     int32_t index;
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     if (value == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
@@ -306,12 +316,12 @@ struct zaclr_result zaclr_native_System_String::Substring___STRING__I4__I4(struc
 
     console_write("[ZACLR][interop] System.String.Substring(I4,I4) enter\n");
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     if (value == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
@@ -399,14 +409,14 @@ struct zaclr_result zaclr_native_System_String::Substring___STRING__I4(struct za
         console_write("\n");
     }
 
-    if (frame.runtime == NULL || this_value == NULL || start_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE || start_value->kind != ZACLR_STACK_VALUE_I4)
+    if (frame.runtime == NULL || this_value == NULL || start_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE || start_value->kind != ZACLR_STACK_VALUE_I4)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
     console_write("[ZACLR][interop] System.String.Substring(I4) args-ok\n");
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     if (value == NULL)
     {
         return zaclr_native_call_frame_set_object(&frame, 0u);
@@ -450,12 +460,12 @@ struct zaclr_result zaclr_native_System_String::StartsWith___BOOLEAN__STRING(str
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     status = zaclr_native_call_frame_arg_string(&frame, 0u, &prefix);
     if (status.status != ZACLR_STATUS_OK)
     {
@@ -472,12 +482,12 @@ struct zaclr_result zaclr_native_System_String::EndsWith___BOOLEAN__STRING(struc
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     status = zaclr_native_call_frame_arg_string(&frame, 0u, &suffix);
     if (status.status != ZACLR_STATUS_OK)
     {
@@ -494,12 +504,12 @@ struct zaclr_result zaclr_native_System_String::Contains___BOOLEAN__STRING(struc
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     status = zaclr_native_call_frame_arg_string(&frame, 0u, &needle);
     if (status.status != ZACLR_STATUS_OK)
     {
@@ -536,12 +546,12 @@ struct zaclr_result zaclr_native_System_String::ToUpper___STRING(struct zaclr_na
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     if (value == NULL)
     {
         return zaclr_native_call_frame_set_string(&frame, 0u);
@@ -575,12 +585,12 @@ struct zaclr_result zaclr_native_System_String::ToLower___STRING(struct zaclr_na
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     if (value == NULL)
     {
         return zaclr_native_call_frame_set_string(&frame, 0u);
@@ -616,12 +626,12 @@ struct zaclr_result zaclr_native_System_String::Trim___STRING(struct zaclr_nativ
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     if (value == NULL)
     {
         return zaclr_native_call_frame_set_string(&frame, 0u);
@@ -670,12 +680,12 @@ struct zaclr_result zaclr_native_System_String::Replace___STRING__STRING__STRING
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     status = zaclr_native_call_frame_arg_string(&frame, 0u, &old_value);
     if (status.status != ZACLR_STATUS_OK)
     {
@@ -770,12 +780,12 @@ struct zaclr_result zaclr_native_System_String::IndexOf___I4__CHAR(struct zaclr_
     struct zaclr_stack_value* this_value = zaclr_native_call_frame_this(&frame);
     struct zaclr_result status;
 
-    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+    if (frame.runtime == NULL || this_value == NULL || this_value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
 
-    value = get_string_arg(frame.runtime, this_value->data.object_handle);
+    value = get_string_arg(frame.runtime, stack_object_handle(frame.runtime, this_value));
     if (value == NULL)
     {
         return zaclr_native_call_frame_set_i4(&frame, -1);
@@ -879,7 +889,7 @@ struct zaclr_result zaclr_native_System_String::_ctor___VOID__SZARRAY_CHAR__I4__
 
     {
         zaclr_object_handle handle = 0u;
-        status = zaclr_string_allocate_utf16(&frame.runtime->heap, chars, length, &handle);
+        status = zaclr_string_allocate_utf16_handle(&frame.runtime->heap, chars, length, &handle);
         if (chars != NULL)
         {
             kernel_free(chars);

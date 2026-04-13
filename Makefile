@@ -735,10 +735,6 @@ $(INITRAMFS_IMG): | $(BUILD_DIR)
 	@if [ -d dotnet ]; then \
 		find dotnet -maxdepth 1 -type f -exec cp {} $(BUILD_DIR)/initramfs_root/ \; ; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/initramfs_root/System.Private.CoreLib.dll ]; then \
-		if [ -f $(BUILD_DIR)/System.Private.CoreLib.dll ]; then cp $(BUILD_DIR)/System.Private.CoreLib.dll $(BUILD_DIR)/initramfs_root/System.Private.CoreLib.dll; \
-		elif [ -f $(SRC_DIR)/managed/System.Private.CoreLib/bin/Release/net10.0/System.Private.CoreLib.dll ]; then cp $(SRC_DIR)/managed/System.Private.CoreLib/bin/Release/net10.0/System.Private.CoreLib.dll $(BUILD_DIR)/initramfs_root/System.Private.CoreLib.dll; fi; \
-	fi
 	@(cd $(BUILD_DIR)/initramfs_root && find . -print | cpio -o -H newc 2>/dev/null | gzip -n > ../initramfs.cpio.gz)
 	@echo "Initramfs image: $@"
 

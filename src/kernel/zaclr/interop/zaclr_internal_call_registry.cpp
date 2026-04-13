@@ -156,7 +156,7 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
     const struct zaclr_method_desc* method,
     struct zaclr_internal_call_resolution* out_resolution)
 {
-    const struct zaclr_native_assembly_descriptor* assembly;
+    const struct zaclr_native_assembly_descriptor* assembly = NULL;
     uint32_t method_index;
     struct zaclr_result result;
 
@@ -164,6 +164,9 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
     }
+
+    out_resolution->assembly_name = NULL;
+    out_resolution->method = NULL;
 
     result = zaclr_internal_call_registry_find_assembly(registry,
                                                         owning_assembly->assembly_name.text,
@@ -178,16 +181,6 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
                                owning_assembly->id);
         return result;
     }
-
-    log_method_search_line("MethodSearch.Searching",
-                           owning_assembly->assembly_name.text,
-                           owning_type->type_namespace.text,
-                           owning_type->type_name.text,
-                           method->name.text,
-                           method->token.raw);
-
-    out_resolution->assembly_name = NULL;
-    out_resolution->method = NULL;
 
     for (method_index = 0u; method_index < ZACLR_INTERNAL_CALL_REGISTRY_ROW_CACHE_CAPACITY; ++method_index)
     {
@@ -209,17 +202,41 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
         }
     }
 
+    log_method_search_line("MethodSearch.Searching",
+                           assembly->assembly_name,
+                           owning_type->type_namespace.text,
+                           owning_type->type_name.text,
+                           method->name.text,
+                           method->token.raw);
+
     for (method_index = 0u; method_index < assembly->method_count; ++method_index)
     {
         const struct zaclr_native_bind_method* candidate = &assembly->method_lookup[method_index];
+        bool matches = false;
         log_method_search_line("MethodSearch.Check",
                                assembly->assembly_name,
                                candidate != NULL ? candidate->type_namespace : NULL,
                                candidate != NULL ? candidate->type_name : NULL,
                                candidate != NULL ? candidate->method_name : "<null>",
                                method_index + 1u);
-        if (candidate != NULL
-            && zaclr_native_bind_method_matches_managed(owning_assembly, owning_type, method, candidate))
+        if (candidate == NULL)
+        {
+            continue;
+        }
+
+        matches = zaclr_native_bind_method_matches_managed(owning_assembly, owning_type, method, candidate);
+        if (!matches
+            && method->pinvoke_import_name.text != NULL
+            && zaclr_internal_call_text_equals(candidate->type_namespace, owning_type->type_namespace.text)
+            && zaclr_internal_call_text_equals(candidate->type_name, owning_type->type_name.text)
+            && zaclr_internal_call_text_equals(candidate->method_name, method->pinvoke_import_name.text)
+            && candidate->signature.has_this == ((method->signature.calling_convention & 0x20u) != 0u ? 1u : 0u)
+            && candidate->signature.parameter_count == method->signature.parameter_count)
+        {
+            matches = true;
+        }
+
+        if (matches)
         {
             log_method_search_line("MethodSearch.Found",
                                    assembly->assembly_name,

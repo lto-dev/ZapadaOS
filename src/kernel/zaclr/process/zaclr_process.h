@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+struct zaclr_object_desc;
+
 struct zaclr_process {
     zaclr_process_id id;
     zaclr_security_context_id security_context;
@@ -24,7 +26,7 @@ struct zaclr_thread {
     zaclr_app_domain_id domain;
     enum zaclr_thread_state state;
     zaclr_frame_id current_frame;
-    zaclr_object_handle current_exception;
+    struct zaclr_object_desc* current_exception;
     uint32_t flags;
 };
 

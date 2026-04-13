@@ -5,6 +5,10 @@
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
 #include <kernel/zaclr/metadata/zaclr_metadata_reader.h>
 
+extern "C" {
+#include <kernel/console.h>
+}
+
 namespace
 {
     static void append_text(char* buffer, size_t capacity, size_t* length, const char* text)
@@ -387,6 +391,14 @@ namespace
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
+        console_write("[ZACLR][frame] init begin method_rva=");
+        console_write_hex64((uint64_t)method->rva);
+        console_write(" image_ptr=");
+        console_write_hex64((uint64_t)(uintptr_t)assembly->image.image.data);
+        console_write(" image_size=");
+        console_write_dec((uint64_t)assembly->image.image.size);
+        console_write("\n");
+
         if (method->rva == 0u)
         {
             return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
@@ -398,8 +410,16 @@ namespace
             return result;
         }
 
+        console_write("[ZACLR][frame] body_offset=");
+        console_write_dec((uint64_t)body_offset);
+        console_write("\n");
+
         body = assembly->image.image.data + body_offset;
         header = body[0];
+
+        console_write("[ZACLR][frame] header=");
+        console_write_hex64((uint64_t)header);
+        console_write("\n");
 
         frame = (struct zaclr_frame*)kernel_alloc(sizeof(struct zaclr_frame));
         if (frame == NULL)
@@ -415,6 +435,15 @@ namespace
         frame->method = method;
         frame->thread_id = thread_id;
         frame->process_id = process_id;
+        if (parent != NULL)
+        {
+            result = zaclr_generic_context_clone(&frame->generic_context, &parent->generic_context);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                kernel_free(frame);
+                return result;
+            }
+        }
         argument_count = method->signature.parameter_count;
         if ((method->signature.calling_convention & 0x20u) != 0u)
         {
@@ -534,6 +563,17 @@ namespace
                               ZACLR_TRACE_EVENT_OPCODE_RAW,
                               format_trace_method_name(assembly, method, trace_name, sizeof(trace_name)),
                               (uint64_t)frame->il_start[0]);
+            if (method->token.raw == 0x06000A4Bu)
+            {
+                uint32_t dump_count = frame->il_size < 16u ? frame->il_size : 16u;
+                console_write("[ZACLR][frame] Type.cctor il_bytes=");
+                for (uint32_t index = 0u; index < dump_count; ++index)
+                {
+                    console_write_hex64((uint64_t)frame->il_start[index]);
+                    console_write(index + 1u < dump_count ? " " : "");
+                }
+                console_write("\n");
+            }
         }
 
         *out_frame = frame;
@@ -588,7 +628,7 @@ extern "C" struct zaclr_result zaclr_frame_create_child(struct zaclr_engine* eng
 }
 
 extern "C" struct zaclr_result zaclr_frame_bind_arguments(struct zaclr_frame* frame,
-                                                            struct zaclr_eval_stack* caller_stack)
+                                                             struct zaclr_eval_stack* caller_stack)
 {
     uint32_t argument_index;
 
@@ -596,6 +636,12 @@ extern "C" struct zaclr_result zaclr_frame_bind_arguments(struct zaclr_frame* fr
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
+
+    console_write("[ZACLR][frame] bind args frame_arg_count=");
+    console_write_dec((uint64_t)frame->argument_count);
+    console_write(" caller_depth=");
+    console_write_dec((uint64_t)caller_stack->depth);
+    console_write("\n");
 
     if (caller_stack->depth < frame->argument_count)
     {
@@ -627,17 +673,30 @@ extern "C" void zaclr_frame_destroy(struct zaclr_frame* frame)
 {
         if (frame != NULL)
     {
+        uint32_t index;
+
         zaclr_eval_stack_destroy(&frame->eval_stack);
         if (frame->exception_clauses != NULL)
         {
             kernel_free(frame->exception_clauses);
         }
+        zaclr_generic_context_reset(&frame->generic_context);
         if (frame->locals != NULL)
         {
+            for (index = 0u; index < frame->local_count; ++index)
+            {
+                zaclr_stack_value_reset(&frame->locals[index]);
+            }
+
             kernel_free(frame->locals);
         }
         if (frame->arguments != NULL)
         {
+            for (index = 0u; index < frame->argument_count; ++index)
+            {
+                zaclr_stack_value_reset(&frame->arguments[index]);
+            }
+
             kernel_free(frame->arguments);
         }
         kernel_free(frame);

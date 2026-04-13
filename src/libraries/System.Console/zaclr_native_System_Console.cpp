@@ -30,7 +30,7 @@ namespace
 
         if (string_handle != 0u)
         {
-            const char* text = zaclr_string_chars_from_handle(&frame.runtime->heap, string_handle);
+            const char* text = zaclr_string_ascii_chars_from_handle(&frame.runtime->heap, string_handle);
             if (text == NULL)
             {
                 return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);

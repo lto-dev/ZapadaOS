@@ -5,6 +5,7 @@
 #include <kernel/zaclr/exec/zaclr_engine.h>
 #include <kernel/zaclr/loader/zaclr_loader.h>
 #include <kernel/zaclr/metadata/zaclr_method_map.h>
+#include <kernel/zaclr/typesystem/zaclr_generic_context.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,7 @@ struct zaclr_frame {
     struct zaclr_exception_clause* exception_clauses;
     uint16_t exception_clause_count;
     struct zaclr_eval_stack eval_stack;
+    struct zaclr_generic_context generic_context;
     uint32_t flags;
 };
 

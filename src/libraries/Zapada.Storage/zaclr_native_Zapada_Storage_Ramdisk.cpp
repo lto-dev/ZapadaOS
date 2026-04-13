@@ -51,7 +51,7 @@ struct zaclr_result zaclr_native_Zapada_Storage_Ramdisk::Lookup___STATIC__I4__ST
         return status;
     }
 
-    return zaclr_native_call_frame_set_i4(&frame, lookup_index(filename != NULL ? zaclr_string_chars(filename) : NULL));
+    return zaclr_native_call_frame_set_i4(&frame, lookup_index(filename != NULL ? zaclr_string_ascii_chars(filename) : NULL));
 }
 
 struct zaclr_result zaclr_native_Zapada_Storage_Ramdisk::Read___STATIC__I4__I4__SZARRAY_U1__I4__I4(struct zaclr_native_call_frame& frame)
@@ -96,7 +96,7 @@ struct zaclr_result zaclr_native_Zapada_Storage_Ramdisk::GetFileName___STATIC__S
         {
             ++length;
         }
-        status = zaclr_string_allocate_ascii(&frame.runtime->heap, file.filename, length, &handle);
+        status = zaclr_string_allocate_ascii_handle(&frame.runtime->heap, file.filename, length, &handle);
     }
     return status.status == ZACLR_STATUS_OK ? zaclr_native_call_frame_set_string(&frame, handle) : status;
 }

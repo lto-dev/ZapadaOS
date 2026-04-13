@@ -10,9 +10,14 @@ namespace
 {
     static const uint64_t k_handle_shift = 1u;
 
-    static uint64_t encode_handle_value(uint32_t index)
+    static int64_t encode_handle_index(uint32_t index)
     {
-        return ((uint64_t)index + 1u) << k_handle_shift;
+        return (int64_t)(((uint64_t)index + 1u) << k_handle_shift);
+    }
+
+    static struct zaclr_handle_table* gc_handle_table(struct zaclr_native_call_frame& frame)
+    {
+        return frame.runtime != NULL ? &frame.runtime->boot_launch.handle_table : NULL;
     }
 
     static bool decode_handle_value(int64_t value, uint32_t* out_index)
@@ -40,11 +45,6 @@ namespace
         return true;
     }
 
-    static struct zaclr_handle_table* gc_handle_table(struct zaclr_native_call_frame& frame)
-    {
-        return frame.runtime != NULL ? &frame.runtime->boot_launch.handle_table : NULL;
-    }
-
     static struct zaclr_result get_entry(struct zaclr_native_call_frame& frame,
                                          int64_t handle_value,
                                          uint32_t* out_index,
@@ -61,6 +61,7 @@ namespace
 
         if (!decode_handle_value(handle_value, &index))
         {
+
             zaclr_object_handle object_handle = handle_value > 0 ? (zaclr_object_handle)handle_value : 0u;
             for (index = 0u; index < table->count; ++index)
             {
@@ -150,11 +151,23 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::_Inter
         return status;
     }
 
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleAlloc.ObjectHandle",
+                      (uint64_t)handle);
+
     status = zaclr_native_call_frame_arg_i4(&frame, 1u, &type);
     if (status.status != ZACLR_STATUS_OK)
     {
         return status;
     }
+
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleAlloc.TypeArg",
+                      (uint64_t)(uint32_t)type);
 
     switch (type)
     {
@@ -184,9 +197,9 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::_Inter
     ZACLR_TRACE_VALUE(frame.runtime,
                       ZACLR_TRACE_CATEGORY_INTEROP,
                       ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                      "GCHandleAlloc.EncodedHandle",
-                      encode_handle_value(index));
-    return zaclr_native_call_frame_set_i8(&frame, (int64_t)encode_handle_value(index));
+                      "GCHandleAlloc.ReturnEncodedHandle",
+                      (uint64_t)encode_handle_index(index));
+    return zaclr_native_call_frame_set_i8(&frame, encode_handle_index(index));
 }
 
 struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::_InternalFree___STATIC__BOOLEAN__I(struct zaclr_native_call_frame& frame)
@@ -219,6 +232,35 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::_Inter
     return zaclr_native_call_frame_set_bool(&frame, true);
 }
 
+struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::GCHandle_InternalFreeWithGCTransition___STATIC__VOID__I(struct zaclr_native_call_frame& frame)
+{
+    int64_t handle_value;
+    uint32_t index;
+    struct zaclr_gc_handle_entry entry;
+    struct zaclr_handle_table* table = gc_handle_table(frame);
+    struct zaclr_result status;
+
+    if (table == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_PROCESS);
+    }
+
+    status = zaclr_native_call_frame_arg_i8(&frame, 0u, &handle_value);
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        return status;
+    }
+
+    status = get_entry(frame, handle_value, &index, &entry);
+    if (status.status == ZACLR_STATUS_OK)
+    {
+        update_pinned_state(frame, &entry, NULL);
+        table->entries[index] = {};
+    }
+
+    return zaclr_native_call_frame_set_void(&frame);
+}
+
 struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::InternalGet___STATIC__OBJECT__I(struct zaclr_native_call_frame& frame)
 {
     int64_t handle_value;
@@ -233,11 +275,42 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::Intern
     status = get_entry(frame, handle_value, &index, &entry);
     if (status.status != ZACLR_STATUS_OK)
     {
+        ZACLR_TRACE_VALUE(frame.runtime,
+                          ZACLR_TRACE_CATEGORY_INTEROP,
+                          ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                          "GCHandleGet.ResolveStatus",
+                          (uint64_t)status.status);
         return zaclr_native_call_frame_set_object(&frame, 0u);
     }
 
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleGet.HandleValue",
+                      (uint64_t)handle_value);
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleGet.Index",
+                      (uint64_t)index);
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleGet.Kind",
+                      (uint64_t)entry.kind);
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleGet.ObjectHandle",
+                      (uint64_t)entry.handle);
+
     if (entry.handle != 0u && zaclr_heap_get_object(&frame.runtime->heap, entry.handle) == NULL)
     {
+        ZACLR_TRACE_VALUE(frame.runtime,
+                          ZACLR_TRACE_CATEGORY_INTEROP,
+                          ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                          "GCHandleGet.LiveObjectMissing",
+                          (uint64_t)entry.handle);
         return zaclr_native_call_frame_set_object(&frame, 0u);
     }
 
@@ -331,6 +404,26 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::Intern
 
     new_entry = old_entry;
     new_entry.handle = handle;
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleSet.HandleValue",
+                      (uint64_t)handle_value);
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleSet.Index",
+                      (uint64_t)index);
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleSet.OldObjectHandle",
+                      (uint64_t)old_entry.handle);
+    ZACLR_TRACE_VALUE(frame.runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GCHandleSet.NewObjectHandle",
+                      (uint64_t)new_entry.handle);
     update_pinned_state(frame, &old_entry, &new_entry);
     table->entries[index] = new_entry;
     return zaclr_native_call_frame_set_void(&frame);

@@ -23,7 +23,7 @@ using System;
 
 namespace Zapada.Drivers
 {
-    internal static class DllMain
+    public static class DllMain
     {
         /*
          * Initialize() - called by BootLoader.cs once VBLK.DLL is loaded.
@@ -33,7 +33,7 @@ namespace Zapada.Drivers
          * return value; it returns 1 to BootLoader if the managed method executed
          * without interpreter error.  The int return here is for future use.
          */
-        internal static int Initialize()
+        public static int Initialize()
         {
             Console.Write("[Boot] VirtioBlock driver initialized\n");
             Console.Write("[Gate] Phase31-D1\n");

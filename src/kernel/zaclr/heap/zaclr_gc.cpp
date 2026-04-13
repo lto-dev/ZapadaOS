@@ -4,12 +4,18 @@
 #include <kernel/zaclr/heap/zaclr_gc_roots.h>
 #include <kernel/zaclr/heap/zaclr_heap.h>
 #include <kernel/zaclr/heap/zaclr_object.h>
+#include <kernel/zaclr/diag/zaclr_trace_events.h>
 #include <kernel/zaclr/exec/zaclr_engine.h>
 #include <kernel/zaclr/metadata/zaclr_method_map.h>
 #include <kernel/zaclr/metadata/zaclr_token.h>
 #include <kernel/zaclr/metadata/zaclr_type_map.h>
 #include <kernel/zaclr/process/zaclr_handle_table.h>
+#include <kernel/zaclr/typesystem/zaclr_method_table.h>
 #include <kernel/zaclr/typesystem/zaclr_type_system.h>
+
+extern "C" {
+#include <kernel/support/kernel_memory.h>
+}
 
 namespace
 {
@@ -22,25 +28,25 @@ namespace
         struct zaclr_runtime* runtime;
     };
 
-    static void zaclr_gc_mark_handle(struct zaclr_runtime* runtime, zaclr_object_handle handle);
+    static void zaclr_gc_mark_object_impl(struct zaclr_runtime* runtime, struct zaclr_object_desc* object);
 
     static void zaclr_gc_mark_array_children(struct zaclr_runtime* runtime,
                                              struct zaclr_array_desc* array)
     {
         uint32_t index;
-        zaclr_object_handle* elements;
+        struct zaclr_object_desc** elements;
 
         if (runtime == NULL || array == NULL || !zaclr_object_contains_references(&array->object))
         {
             return;
         }
 
-        if (array->element_size != sizeof(zaclr_object_handle))
+        if (array->element_size != sizeof(struct zaclr_object_desc*))
         {
             return;
         }
 
-        elements = (zaclr_object_handle*)zaclr_array_data(array);
+        elements = (struct zaclr_object_desc**)zaclr_array_data(array);
         if (elements == NULL)
         {
             return;
@@ -48,7 +54,7 @@ namespace
 
         for (index = 0u; index < array->length; ++index)
         {
-            zaclr_gc_mark_handle(runtime, elements[index]);
+            zaclr_gc_mark_object_impl(runtime, elements[index]);
         }
     }
 
@@ -56,28 +62,49 @@ namespace
                                                         struct zaclr_reference_object_desc* object)
     {
         uint32_t index;
-        const uint32_t* field_tokens;
-        const struct zaclr_stack_value* field_values;
+        const struct zaclr_method_table* method_table;
 
         if (runtime == NULL || object == NULL)
         {
             return;
         }
 
-        field_tokens = zaclr_reference_object_field_tokens_const(object);
-        field_values = zaclr_reference_object_field_values_const(object);
-
-        for (index = 0u; index < object->field_capacity; ++index)
+        method_table = zaclr_object_method_table_const(&object->object);
+        if (method_table != NULL && method_table->instance_fields != NULL)
         {
-            const struct zaclr_stack_value* value = &field_values[index];
-            if (field_tokens[index] == 0u)
+            for (index = 0u; index < method_table->instance_field_count; ++index)
             {
-                continue;
+                const struct zaclr_field_layout* layout = &method_table->instance_fields[index];
+                const void* address;
+                struct zaclr_object_desc* reference = NULL;
+
+                if (layout->is_static != 0u || layout->is_reference == 0u)
+                {
+                    continue;
+                }
+
+                address = zaclr_reference_object_field_address_const(
+                    object,
+                    zaclr_token_make(((uint32_t)ZACLR_TOKEN_TABLE_FIELD << 24) | layout->field_token_row));
+                if (address == NULL)
+                {
+                    continue;
+                }
+
+                kernel_memcpy(&reference, address, sizeof(reference));
+                zaclr_gc_mark_object_impl(runtime, reference);
             }
+
+            return;
+        }
+
+        for (index = 0u; index < object->compatibility_field_capacity; ++index)
+        {
+            const struct zaclr_stack_value* value = ((const struct zaclr_stack_value*)((const uint8_t*)object + sizeof(struct zaclr_reference_object_desc))) + index;
 
             if (zaclr_stack_value_contains_references(value) != 0u)
             {
-                zaclr_gc_mark_handle(runtime, value->data.object_handle);
+                zaclr_gc_mark_object_impl(runtime, value->data.object_reference);
             }
         }
     }
@@ -92,7 +119,7 @@ namespace
 
         if (zaclr_stack_value_contains_references(&boxed_value->value) != 0u)
         {
-            zaclr_gc_mark_handle(runtime, boxed_value->value.data.object_handle);
+            zaclr_gc_mark_object_impl(runtime, boxed_value->value.data.object_reference);
         }
     }
 
@@ -130,16 +157,13 @@ namespace
         }
     }
 
-    static void zaclr_gc_mark_handle(struct zaclr_runtime* runtime, zaclr_object_handle handle)
+    static void zaclr_gc_mark_object_impl(struct zaclr_runtime* runtime, struct zaclr_object_desc* object)
     {
-        struct zaclr_object_desc* object;
-
-        if (runtime == NULL || handle == 0u)
+        if (runtime == NULL || object == NULL)
         {
             return;
         }
 
-        object = zaclr_heap_get_object(&runtime->heap, handle);
         if (object == NULL || zaclr_object_is_marked(object) != 0u)
         {
             return;
@@ -149,9 +173,9 @@ namespace
         zaclr_gc_mark_object_children(runtime, object);
     }
 
-    static void zaclr_gc_visit_root_handle(zaclr_object_handle* slot,
-                                           uint32_t,
-                                           void* context)
+    static void zaclr_gc_visit_root_object_reference(struct zaclr_object_desc** slot,
+                                                     uint32_t,
+                                                     void* context)
     {
         struct zaclr_gc_mark_context* mark_context = (struct zaclr_gc_mark_context*)context;
         if (slot == NULL || mark_context == NULL)
@@ -159,7 +183,7 @@ namespace
             return;
         }
 
-        zaclr_gc_mark_handle(mark_context->runtime, *slot);
+        zaclr_gc_mark_object_impl(mark_context->runtime, *slot);
     }
 
     static void zaclr_gc_clear_short_weak_handles(struct zaclr_runtime* runtime)
@@ -233,15 +257,8 @@ namespace
 
     static const struct zaclr_type_desc* zaclr_gc_get_object_type(const struct zaclr_object_desc* object)
     {
-        struct zaclr_token token;
-
-        if (object == NULL || object->owning_assembly == NULL || object->type_id == 0u)
-        {
-            return NULL;
-        }
-
-        token = zaclr_token_make(((uint32_t)ZACLR_TOKEN_TABLE_TYPEDEF << 24) | (uint32_t)object->type_id);
-        return zaclr_type_map_find_by_token(&object->owning_assembly->type_map, token);
+        const struct zaclr_method_table* method_table = zaclr_object_method_table_const(object);
+        return method_table != NULL ? method_table->type_desc : NULL;
     }
 
     static uint32_t zaclr_gc_object_has_finalizer(const struct zaclr_object_desc* object)
@@ -255,20 +272,22 @@ namespace
         const struct zaclr_type_desc* type;
         uint32_t index;
 
-        if (object == NULL || object->owning_assembly == NULL)
+        const struct zaclr_method_table* method_table = zaclr_object_method_table_const(object);
+
+        if (object == NULL || method_table == NULL || method_table->assembly == NULL)
         {
             return NULL;
         }
 
         type = zaclr_gc_get_object_type(object);
-        if (type == NULL || object->owning_assembly->method_map.methods == NULL)
+        if (type == NULL || method_table->assembly->method_map.methods == NULL)
         {
             return NULL;
         }
 
         for (index = 0u; index < type->method_count; ++index)
         {
-            const struct zaclr_method_desc* method = &object->owning_assembly->method_map.methods[type->first_method_index + index];
+            const struct zaclr_method_desc* method = &method_table->assembly->method_map.methods[type->first_method_index + index];
             if (method->name.text != NULL
                 && zaclr_text_equals(method->name.text, "Finalize")
                 && method->signature.parameter_count == 0u
@@ -306,14 +325,14 @@ namespace
     {
         uint32_t index;
 
-        if (runtime == NULL || runtime->heap.slots == NULL)
+        if (runtime == NULL || runtime->heap.nodes == NULL)
         {
             return zaclr_result_ok();
         }
 
-        for (index = 0u; index < runtime->heap.slot_count; ++index)
+        for (index = 0u; index < runtime->heap.node_count; ++index)
         {
-            struct zaclr_heap_slot* slot = &runtime->heap.slots[index];
+            struct zaclr_heap_object_node* slot = &runtime->heap.nodes[index];
             struct zaclr_object_desc* object;
             uint32_t queue_index;
             struct zaclr_result result;
@@ -325,6 +344,7 @@ namespace
 
             object = slot->object;
             if (zaclr_object_is_marked(object) != 0u
+                || (object->gc_state & ZACLR_OBJECT_GC_STATE_FINALIZER_SUPPRESSED) != 0u
                 || (object->gc_state & ZACLR_OBJECT_GC_STATE_FINALIZER_PENDING) == 0u
                 || (object->gc_state & ZACLR_OBJECT_GC_STATE_FINALIZER_QUEUED) != 0u)
             {
@@ -332,7 +352,7 @@ namespace
             }
 
             result = zaclr_handle_table_store_ex(&runtime->finalizer_queue,
-                                                 object->handle,
+                                                 zaclr_heap_get_object_handle(&runtime->heap, object),
                                                  ZACLR_GC_HANDLE_KIND_STRONG,
                                                  &queue_index);
             if (result.status != ZACLR_STATUS_OK)
@@ -342,7 +362,7 @@ namespace
 
             (void)queue_index;
             object->gc_state = (uint8_t)(object->gc_state | ZACLR_OBJECT_GC_STATE_FINALIZER_QUEUED);
-            zaclr_gc_mark_handle(runtime, object->handle);
+            zaclr_gc_mark_object_impl(runtime, object);
         }
 
         return zaclr_result_ok();
@@ -368,7 +388,7 @@ extern "C" struct zaclr_result zaclr_gc_collect(struct zaclr_runtime* runtime)
     zaclr_heap_clear_marks(&runtime->heap);
 
     mark_context.runtime = runtime;
-    visitor.visit_handle = zaclr_gc_visit_root_handle;
+    visitor.visit_object_reference = zaclr_gc_visit_root_object_reference;
     visitor.context = &mark_context;
 
     zaclr_gc_enumerate_runtime_roots(runtime, &visitor);
@@ -418,14 +438,15 @@ extern "C" struct zaclr_result zaclr_gc_wait_for_pending_finalizers(struct zaclr
         if (object != NULL)
         {
             const struct zaclr_method_desc* finalizer = zaclr_gc_get_finalizer_method(object);
+            const struct zaclr_method_table* method_table = zaclr_object_method_table_const(object);
             if (finalizer != NULL)
             {
                 struct zaclr_result invoke_status = zaclr_engine_execute_instance_method(&runtime->engine,
                                                                                          runtime,
                                                                                          &runtime->boot_launch,
-                                                                                         object->owning_assembly,
+                                                                                         method_table != NULL ? method_table->assembly : NULL,
                                                                                          finalizer,
-                                                                                         object->handle);
+                                                                                         object);
                 if (invoke_status.status != ZACLR_STATUS_OK)
                 {
                     return invoke_status;
@@ -445,6 +466,12 @@ extern "C" struct zaclr_result zaclr_gc_wait_for_pending_finalizers(struct zaclr
     return zaclr_result_ok();
 }
 
+extern "C" void zaclr_gc_mark_object(struct zaclr_runtime* runtime,
+                                       struct zaclr_object_desc* object)
+{
+    zaclr_gc_mark_object_impl(runtime, object);
+}
+
 extern "C" struct zaclr_result zaclr_gc_suppress_finalize(struct zaclr_runtime* runtime, zaclr_object_handle handle)
 {
     struct zaclr_object_desc* object;
@@ -460,8 +487,25 @@ extern "C" struct zaclr_result zaclr_gc_suppress_finalize(struct zaclr_runtime* 
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    object->gc_state = (uint8_t)(object->gc_state & ~k_finalizer_state_mask);
+    ZACLR_TRACE_VALUE(runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GcSuppressFinalize.Handle",
+                      (uint64_t)handle);
+    ZACLR_TRACE_VALUE(runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GcSuppressFinalize.OldState",
+                      (uint64_t)object->gc_state);
+
+    object->gc_state = (uint8_t)((object->gc_state & ~k_finalizer_state_mask)
+                               | ZACLR_OBJECT_GC_STATE_FINALIZER_SUPPRESSED);
     zaclr_gc_remove_handle_from_table(&runtime->finalizer_queue, handle);
+    ZACLR_TRACE_VALUE(runtime,
+                      ZACLR_TRACE_CATEGORY_INTEROP,
+                      ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
+                      "GcSuppressFinalize.NewState",
+                      (uint64_t)object->gc_state);
     return zaclr_result_ok();
 }
 
@@ -485,7 +529,8 @@ extern "C" struct zaclr_result zaclr_gc_reregister_for_finalize(struct zaclr_run
         return zaclr_result_ok();
     }
 
-    object->gc_state = (uint8_t)((object->gc_state & ~k_finalizer_state_mask)
+    object->gc_state = (uint8_t)(((object->gc_state & ~k_finalizer_state_mask)
+                               & ~ZACLR_OBJECT_GC_STATE_FINALIZER_SUPPRESSED)
                                | ZACLR_OBJECT_GC_STATE_FINALIZER_PENDING);
     zaclr_gc_remove_handle_from_table(&runtime->finalizer_queue, handle);
     return zaclr_result_ok();

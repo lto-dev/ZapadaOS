@@ -243,7 +243,6 @@ function Publish-ManagedAssembly {
 
 function Restore-ManagedCacheToBuild {
     $cacheFiles = @(
-        @{ Cache = (Join-Path $managedCacheRoot "System.Private.CoreLib.dll"); Target = (Join-Path (Get-Location).Path "build\System.Private.CoreLib.dll"); Required = $true },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Boot.dll"); Target = (Join-Path (Get-Location).Path "build\boot.dll"); Required = $true },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Test.Hello.dll"); Target = (Join-Path (Get-Location).Path "build\hello.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Drivers.VirtioBlock.dll"); Target = (Join-Path (Get-Location).Path "build\vblk.dll"); Required = $false },
@@ -297,18 +296,6 @@ if ($SkipDotnet) {
 } else {
     Stop-DotnetBuildServers
 }
-
-Publish-ManagedAssembly `
-    -DisplayName "managed core library (System.Private.CoreLib)" `
-    -ProjectPath (Join-Path (Get-Location).Path "src\managed\System.Private.CoreLib\System.Private.CoreLib.csproj") `
-    -PublishOut (Join-Path (Get-Location).Path "build\corelib-out") `
-    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\corelib-out") "System.Private.CoreLib.dll") `
-    -StagedDllPath (Join-Path (Get-Location).Path "build\System.Private.CoreLib.dll") `
-    -CacheDllPath (Join-Path $managedCacheRoot "System.Private.CoreLib.dll") `
-    -Required `
-    -MissingDotnetMessage "ERROR: 'dotnet' not found. System.Private.CoreLib cannot be built." `
-    -MissingProjectMessage "ERROR: System.Private.CoreLib.csproj not found at $(Join-Path (Get-Location).Path "src\managed\System.Private.CoreLib\System.Private.CoreLib.csproj")" `
-    -PublishFailureMessage "ERROR: dotnet publish System.Private.CoreLib failed."
 
 Publish-ManagedAssembly `
     -DisplayName "managed core library (System.Console)" `
@@ -489,6 +476,6 @@ if ($Arch -eq "aarch64") {
 # --------------------------------------------------------------------------
 if ($Run) {
     Write-Host "Launching QEMU..." -ForegroundColor Cyan
-    & .\run.ps1 -Arch $Arch -TimeoutSec 90
+    & .\run.ps1 -Arch $Arch -TimeoutSec 500
 }
 

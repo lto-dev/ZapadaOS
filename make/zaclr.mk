@@ -9,8 +9,12 @@ ZACLR_CORE_CPP_SOURCES := \
 	$(ZACLR_ROOT)/diag/zaclr_dump_state.cpp \
 	$(ZACLR_ROOT)/diag/zaclr_trace.cpp \
 	$(ZACLR_ROOT)/diag/zaclr_trace_format.cpp \
+	$(ZACLR_ROOT)/exec/zaclr_call_resolution.cpp \
 	$(ZACLR_ROOT)/exec/zaclr_dispatch.cpp \
 	$(ZACLR_ROOT)/exec/zaclr_engine.cpp \
+	$(ZACLR_ROOT)/exec/zaclr_interop_dispatch.cpp \
+	$(ZACLR_ROOT)/exec/zaclr_intrinsics.cpp \
+	$(ZACLR_ROOT)/exec/zaclr_type_init.cpp \
 	$(ZACLR_ROOT)/exec/zaclr_eval_stack.cpp \
 	$(ZACLR_ROOT)/exec/zaclr_exceptions.cpp \
 	$(ZACLR_ROOT)/exec/zaclr_frame.cpp \
@@ -25,7 +29,10 @@ ZACLR_CORE_CPP_SOURCES := \
 	$(ZACLR_ROOT)/interop/zaclr_internal_call_registry.cpp \
 	$(ZACLR_ROOT)/interop/zaclr_marshalling.cpp \
 	$(ZACLR_ROOT)/interop/zaclr_native_assembly.cpp \
+	$(ZACLR_ROOT)/interop/zaclr_pinvoke_resolver.cpp \
+	$(ZACLR_ROOT)/interop/zaclr_qcall_table.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_assembly_registry.cpp \
+	$(ZACLR_ROOT)/loader/zaclr_assembly_source_initramfs.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_binder.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_loader.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_pe_image.cpp \
@@ -34,7 +41,15 @@ ZACLR_CORE_CPP_SOURCES := \
 	$(ZACLR_ROOT)/metadata/zaclr_signature.cpp \
 	$(ZACLR_ROOT)/metadata/zaclr_token.cpp \
 	$(ZACLR_ROOT)/metadata/zaclr_type_map.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_field_layout.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_delegate_runtime.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_call_target.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_generic_context.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_method_handle.cpp \
 	$(ZACLR_ROOT)/typesystem/zaclr_member_resolution.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_method_table.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_type_identity.cpp \
+	$(ZACLR_ROOT)/typesystem/zaclr_type_prepare.cpp \
 	$(ZACLR_ROOT)/typesystem/zaclr_type_system.cpp \
 	$(ZACLR_ROOT)/runtime/zaclr_boot_shared.cpp \
 	$(ZACLR_ROOT)/runtime/zaclr_runtime.cpp \

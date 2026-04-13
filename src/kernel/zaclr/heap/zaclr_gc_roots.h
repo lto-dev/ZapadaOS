@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+struct zaclr_object_desc;
+
 enum zaclr_gc_root_flags {
     ZACLR_GC_ROOT_FLAG_THREAD_EXCEPTION = 0x00000001u,
     ZACLR_GC_ROOT_FLAG_ARGUMENT = 0x00000002u,
@@ -18,12 +20,12 @@ enum zaclr_gc_root_flags {
     ZACLR_GC_ROOT_FLAG_HANDLE_TABLE = 0x00000040u
 };
 
-typedef void (*zaclr_gc_visit_handle_fn)(zaclr_object_handle* slot,
-                                         uint32_t flags,
-                                         void* context);
+typedef void (*zaclr_gc_visit_object_reference_fn)(struct zaclr_object_desc** slot,
+                                                   uint32_t flags,
+                                                   void* context);
 
 struct zaclr_gc_root_visitor {
-    zaclr_gc_visit_handle_fn visit_handle;
+    zaclr_gc_visit_object_reference_fn visit_object_reference;
     void* context;
 };
 

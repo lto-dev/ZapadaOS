@@ -21,18 +21,18 @@ extern "C" uint32_t zaclr_array_length(const struct zaclr_array_desc* value)
 }
 
 extern "C" struct zaclr_result zaclr_array_allocate(struct zaclr_heap* heap,
-                                                       zaclr_type_id type_id,
-                                                       struct zaclr_token element_type,
-                                                       uint32_t element_size,
-                                                       uint32_t length,
-                                                       zaclr_object_handle* out_handle)
+                                                        zaclr_type_id type_id,
+                                                        struct zaclr_token element_type,
+                                                        uint32_t element_size,
+                                                        uint32_t length,
+                                                        struct zaclr_array_desc** out_array)
 {
     struct zaclr_array_desc* array;
     uint32_t data_size;
     size_t allocation_size;
     struct zaclr_result result;
 
-    if (heap == NULL || out_handle == NULL || element_size == 0u)
+    if (heap == NULL || out_array == NULL || element_size == 0u)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
@@ -53,9 +53,35 @@ extern "C" struct zaclr_result zaclr_array_allocate(struct zaclr_heap* heap,
 
     array->element_type = element_type;
     array->element_size = element_size;
-    array->length = length;
-    array->data_size = data_size;
-    *out_handle = array->object.handle;
+    array->length = (int32_t)length;
+    array->reserved = 0u;
+    *out_array = array;
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_array_allocate_handle(struct zaclr_heap* heap,
+                                                              zaclr_type_id type_id,
+                                                              struct zaclr_token element_type,
+                                                              uint32_t element_size,
+                                                              uint32_t length,
+                                                              zaclr_object_handle* out_handle)
+{
+    struct zaclr_array_desc* array;
+    struct zaclr_result result;
+
+    if (out_handle == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    *out_handle = 0u;
+    result = zaclr_array_allocate(heap, type_id, element_type, element_size, length, &array);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    *out_handle = zaclr_heap_get_object_handle(heap, &array->object);
     return zaclr_result_ok();
 }
 
@@ -73,12 +99,12 @@ extern "C" const struct zaclr_array_desc* zaclr_array_from_handle_const(const st
 
 extern "C" void* zaclr_array_data(struct zaclr_array_desc* value)
 {
-    return value != NULL ? (void*)(value + 1) : NULL;
+    return value != NULL ? (void*)((uint8_t*)value + sizeof(struct zaclr_array_desc)) : NULL;
 }
 
 extern "C" const void* zaclr_array_data_const(const struct zaclr_array_desc* value)
 {
-    return value != NULL ? (const void*)(value + 1) : NULL;
+    return value != NULL ? (const void*)((const uint8_t*)value + sizeof(struct zaclr_array_desc)) : NULL;
 }
 
 extern "C" uint32_t zaclr_array_element_size(const struct zaclr_array_desc* value)

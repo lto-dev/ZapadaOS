@@ -2,13 +2,17 @@
 
 #include <kernel/support/kernel_memory.h>
 
+extern "C" {
+#include <kernel/console.h>
+}
+
 namespace {
 
 static bool name_equals(struct zaclr_name_view view, const char* name)
 {
     size_t index;
 
-    if (name == NULL) {
+    if (name == NULL || view.text == NULL) {
         return false;
     }
 
@@ -48,6 +52,11 @@ extern "C" struct zaclr_result zaclr_assembly_registry_register(struct zaclr_ass
     }
 
     if (zaclr_assembly_registry_find_by_name(registry, assembly->assembly_name.text) != NULL) {
+        console_write("[ZACLR][loader] AssemblyRegistry.AlreadyExists name=");
+        console_write(assembly->assembly_name.text != NULL ? assembly->assembly_name.text : "<null>");
+        console_write(" id=");
+        console_write_dec((uint64_t)assembly->id);
+        console_write("\n");
         return zaclr_result_make(ZACLR_STATUS_ALREADY_EXISTS, ZACLR_STATUS_CATEGORY_LOADER);
     }
 
@@ -82,11 +91,33 @@ extern "C" const struct zaclr_loaded_assembly* zaclr_assembly_registry_find_by_n
         return NULL;
     }
 
+    /* console_write("[ZACLR][registry] find_by_name target="); */
+    /* console_write(assembly_name); */
+    /* console_write(" count="); */
+    /* console_write_dec((uint64_t)registry->count); */
+    /* console_write(" capacity="); */
+    /* console_write_dec((uint64_t)registry->capacity); */
+    /* console_write(" entries="); */
+    /* console_write_hex64((uint64_t)(uintptr_t)registry->entries); */
+    /* console_write("\n"); */
+
     for (index = 0u; index < registry->count; ++index) {
+        /* console_write("[ZACLR][registry] check index="); */
+        /* console_write_dec((uint64_t)index); */
+        /* console_write(" id="); */
+        /* console_write_dec((uint64_t)registry->entries[index].id); */
+        /* console_write(" name_ptr="); */
+        /* console_write_hex64((uint64_t)(uintptr_t)registry->entries[index].assembly_name.text); */
+        /* console_write(" len="); */
+        /* console_write_dec((uint64_t)registry->entries[index].assembly_name.length); */
+        /* console_write("\n"); */
         if (name_equals(registry->entries[index].assembly_name, assembly_name)) {
+            /* console_write("[ZACLR][registry] match found\n"); */
             return &registry->entries[index];
         }
     }
+
+    /* console_write("[ZACLR][registry] no match\n"); */
 
     return NULL;
 }

@@ -9,47 +9,466 @@
 #include <kernel/zaclr/metadata/zaclr_metadata_reader.h>
 #include <kernel/zaclr/metadata/zaclr_token.h>
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
+#include <kernel/zaclr/typesystem/zaclr_field_layout.h>
+#include <kernel/zaclr/typesystem/zaclr_type_prepare.h>
 #include <kernel/zaclr/typesystem/zaclr_type_system.h>
+
+extern "C" {
+#include <kernel/console.h>
+}
 
 namespace
 {
-    static size_t zaclr_reference_object_allocation_size(uint32_t field_capacity)
+    static constexpr uint16_t k_field_flag_static = 0x0010u;
+
+    static size_t zaclr_reference_object_allocation_size(const struct zaclr_method_table* method_table,
+                                                         uint32_t compatibility_field_capacity)
     {
+        if (method_table != NULL && method_table->instance_size > ZACLR_OBJECT_HEADER_SIZE)
+        {
+            return sizeof(struct zaclr_reference_object_desc)
+                 + (size_t)(method_table->instance_size - ZACLR_OBJECT_HEADER_SIZE);
+        }
+
         return sizeof(struct zaclr_reference_object_desc)
-             + (sizeof(uint32_t) * (size_t)field_capacity)
-             + (sizeof(struct zaclr_stack_value) * (size_t)field_capacity);
+             + (sizeof(struct zaclr_stack_value) * (size_t)compatibility_field_capacity);
     }
 
-    static bool zaclr_try_get_field_name(const struct zaclr_loaded_assembly* assembly,
-                                         struct zaclr_token token,
-                                         const char** out_name)
+    static uint8_t* reference_data(struct zaclr_reference_object_desc* object)
     {
-        struct zaclr_field_row field_row;
-        struct zaclr_name_view field_name;
+        return object != NULL ? ((uint8_t*)object + sizeof(struct zaclr_reference_object_desc)) : NULL;
+    }
 
-        if (assembly == NULL || out_name == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
+    static bool compatibility_slot_for_type(const struct zaclr_loaded_assembly* assembly,
+                                            const struct zaclr_type_desc* type_desc,
+                                            uint32_t target_field_row,
+                                            uint32_t* io_slot)
+    {
+        const struct zaclr_type_desc* base_type = NULL;
+
+        if (assembly == NULL || type_desc == NULL || io_slot == NULL)
         {
             return false;
         }
 
-        if (zaclr_metadata_reader_get_field_row(&assembly->metadata, zaclr_token_row(&token), &field_row).status != ZACLR_STATUS_OK)
+        if (zaclr_token_matches_table(&type_desc->extends, ZACLR_TOKEN_TABLE_TYPEDEF))
+        {
+            base_type = zaclr_type_map_find_by_token(&assembly->type_map, type_desc->extends);
+            if (base_type != NULL && compatibility_slot_for_type(assembly, base_type, target_field_row, io_slot))
+            {
+                return true;
+            }
+        }
+
+        for (uint32_t field_index = 0u; field_index < type_desc->field_count; ++field_index)
+        {
+            uint32_t field_row = type_desc->field_list + field_index;
+            struct zaclr_field_row row = {};
+            if (zaclr_metadata_reader_get_field_row(&assembly->metadata, field_row, &row).status != ZACLR_STATUS_OK)
+            {
+                continue;
+            }
+
+            if ((row.flags & k_field_flag_static) != 0u)
+            {
+                continue;
+            }
+
+            if (field_row == target_field_row)
+            {
+                return true;
+            }
+
+            ++(*io_slot);
+        }
+
+        return false;
+    }
+
+    static bool compatibility_slot_for_method_table(const struct zaclr_method_table* method_table,
+                                                    uint32_t target_field_row,
+                                                    uint32_t* io_slot)
+    {
+        const struct zaclr_loaded_assembly* assembly;
+        const struct zaclr_type_desc* type_desc;
+
+        if (method_table == NULL || io_slot == NULL)
         {
             return false;
         }
 
-        if (zaclr_metadata_reader_get_string(&assembly->metadata, field_row.name_index, &field_name).status != ZACLR_STATUS_OK)
+        if (method_table->parent != NULL && compatibility_slot_for_method_table(method_table->parent, target_field_row, io_slot))
+        {
+            return true;
+        }
+
+        assembly = method_table->assembly;
+        type_desc = method_table->type_desc;
+        if (assembly == NULL || type_desc == NULL)
         {
             return false;
         }
 
-        *out_name = field_name.text;
+        for (uint32_t field_index = 0u; field_index < type_desc->field_count; ++field_index)
+        {
+            uint32_t field_row = type_desc->field_list + field_index;
+            struct zaclr_field_row row = {};
+            if (zaclr_metadata_reader_get_field_row(&assembly->metadata, field_row, &row).status != ZACLR_STATUS_OK)
+            {
+                continue;
+            }
+
+            if ((row.flags & k_field_flag_static) != 0u)
+            {
+                continue;
+            }
+
+            if (field_row == target_field_row)
+            {
+                return true;
+            }
+
+            ++(*io_slot);
+        }
+
+        return false;
+    }
+
+    static bool compatibility_slot_for_token(const struct zaclr_reference_object_desc* object,
+                                             struct zaclr_token token,
+                                             uint32_t* out_slot)
+    {
+        const struct zaclr_loaded_assembly* assembly;
+        const struct zaclr_type_desc* type_desc;
+        const struct zaclr_method_table* method_table;
+        uint32_t slot = 0u;
+
+        if (object == NULL || out_slot == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
+        {
+            return false;
+        }
+
+        method_table = object->object.header.method_table;
+        if (method_table != NULL && method_table->assembly != NULL && method_table->type_desc != NULL)
+        {
+            if (compatibility_slot_for_method_table(method_table, zaclr_token_row(&token), &slot))
+            {
+                *out_slot = slot;
+                return true;
+            }
+
+            assembly = method_table->assembly;
+            type_desc = method_table->type_desc;
+        }
+        else
+        {
+            assembly = object->object.owning_assembly;
+            if (assembly == NULL || object->object.type_id == 0u)
+            {
+                return false;
+            }
+
+            type_desc = zaclr_type_map_find_by_token(&assembly->type_map,
+                                                     zaclr_token_make(((uint32_t)ZACLR_TOKEN_TABLE_TYPEDEF << 24) | object->object.type_id));
+            if (type_desc == NULL)
+            {
+                return false;
+            }
+        }
+
+        if (!compatibility_slot_for_type(assembly, type_desc, zaclr_token_row(&token), &slot))
+        {
+            return false;
+        }
+
+        *out_slot = slot;
         return true;
+    }
+
+    static const uint8_t* reference_data_const(const struct zaclr_reference_object_desc* object)
+    {
+        return object != NULL ? ((const uint8_t*)object + sizeof(struct zaclr_reference_object_desc)) : NULL;
+    }
+
+    static const struct zaclr_field_layout* find_field_layout(const struct zaclr_object_desc* object,
+                                                              struct zaclr_token token)
+    {
+        const struct zaclr_method_table* method_table;
+        uint32_t index;
+
+        if (object == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
+        {
+            return NULL;
+        }
+
+        method_table = object->header.method_table;
+
+        /* Walk the method table parent chain to find inherited fields.
+           In .NET, ldfld uses field tokens owned by any parent type in the
+           hierarchy.  For example, RuntimeType inherits fields from Type,
+           TypeInfo, MemberInfo, etc.  We must search up the chain. */
+        while (method_table != NULL)
+        {
+            if (method_table->instance_fields != NULL)
+            {
+                for (index = 0u; index < method_table->instance_field_count; ++index)
+                {
+                    const struct zaclr_field_layout* layout = &method_table->instance_fields[index];
+                    if (layout->is_static == 0u && layout->field_token_row == zaclr_token_row(&token))
+                    {
+                        return layout;
+                    }
+                }
+            }
+
+            method_table = method_table->parent;
+        }
+
+        return NULL;
+    }
+
+    static uint8_t* instance_field_base(struct zaclr_object_desc* object)
+    {
+        if (object == NULL)
+        {
+            return NULL;
+        }
+
+        switch (zaclr_object_family(object))
+        {
+            case ZACLR_OBJECT_FAMILY_INSTANCE:
+                return reference_data((struct zaclr_reference_object_desc*)object);
+
+            case ZACLR_OBJECT_FAMILY_STRING:
+            case ZACLR_OBJECT_FAMILY_RUNTIME_TYPE:
+                return ((uint8_t*)object) + sizeof(struct zaclr_object_desc);
+
+            default:
+                return NULL;
+        }
+    }
+
+    static const uint8_t* instance_field_base_const(const struct zaclr_object_desc* object)
+    {
+        return instance_field_base((struct zaclr_object_desc*)object);
+    }
+
+    static void* object_instance_field_address(struct zaclr_object_desc* object,
+                                               struct zaclr_token token)
+    {
+        const struct zaclr_field_layout* layout = find_field_layout(object, token);
+        uint8_t* base = instance_field_base(object);
+        return (layout != NULL && base != NULL) ? (void*)(base + layout->byte_offset) : NULL;
+    }
+
+    static const void* object_instance_field_address_const(const struct zaclr_object_desc* object,
+                                                           struct zaclr_token token)
+    {
+        const struct zaclr_field_layout* layout = find_field_layout(object, token);
+        const uint8_t* base = instance_field_base_const(object);
+        return (layout != NULL && base != NULL) ? (const void*)(base + layout->byte_offset) : NULL;
+    }
+
+    static struct zaclr_result store_field_value(void* address,
+                                                 const struct zaclr_field_layout* layout,
+                                                 const struct zaclr_stack_value* value)
+    {
+        uint64_t wide = 0u;
+
+        if (address == NULL || layout == NULL || value == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        if (layout->element_type == ZACLR_ELEMENT_TYPE_VALUETYPE)
+        {
+            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        if (layout->is_reference != 0u)
+        {
+            struct zaclr_object_desc* reference = value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE ? value->data.object_reference : NULL;
+            zaclr_gc_write_barrier((struct zaclr_object_desc**)address, reference);
+            return zaclr_result_ok();
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I8)
+        {
+            wide = (uint64_t)value->data.i8;
+        }
+        else if (value->kind == ZACLR_STACK_VALUE_I4)
+        {
+            wide = (uint64_t)(uint32_t)value->data.i4;
+        }
+        else
+        {
+            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        switch (layout->field_size)
+        {
+            case 1u:
+            {
+                uint8_t v = (uint8_t)wide;
+                kernel_memcpy(address, &v, sizeof(v));
+                return zaclr_result_ok();
+            }
+            case 2u:
+            {
+                uint16_t v = (uint16_t)wide;
+                kernel_memcpy(address, &v, sizeof(v));
+                return zaclr_result_ok();
+            }
+            case 4u:
+            {
+                uint32_t v = (uint32_t)wide;
+                kernel_memcpy(address, &v, sizeof(v));
+                return zaclr_result_ok();
+            }
+            case 8u:
+                kernel_memcpy(address, &wide, sizeof(wide));
+                return zaclr_result_ok();
+            default:
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+    }
+
+    static struct zaclr_result load_field_value(const void* address,
+                                                const struct zaclr_field_layout* layout,
+                                                struct zaclr_stack_value* out_value)
+    {
+        if (address == NULL || layout == NULL || out_value == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        *out_value = {};
+        if (layout->element_type == ZACLR_ELEMENT_TYPE_VALUETYPE)
+        {
+            return zaclr_stack_value_set_valuetype(out_value,
+                                                   layout->nested_type_token_raw,
+                                                   address,
+                                                   layout->field_size);
+        }
+
+        if (layout->is_reference != 0u)
+        {
+            struct zaclr_object_desc* reference = NULL;
+            kernel_memcpy(&reference, address, sizeof(reference));
+            out_value->kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+            out_value->data.object_reference = reference;
+            return zaclr_result_ok();
+        }
+
+        if (layout->field_size <= 4u)
+        {
+            uint32_t raw = 0u;
+            kernel_memcpy(&raw, address, layout->field_size);
+            out_value->kind = ZACLR_STACK_VALUE_I4;
+            out_value->data.i4 = (int32_t)raw;
+            return zaclr_result_ok();
+        }
+
+        if (layout->field_size == 8u)
+        {
+            uint64_t raw = 0u;
+            kernel_memcpy(&raw, address, sizeof(raw));
+            out_value->kind = ZACLR_STACK_VALUE_I8;
+            out_value->data.i8 = (int64_t)raw;
+            return zaclr_result_ok();
+        }
+
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    static struct zaclr_result boxed_value_prepare_layout(struct zaclr_runtime* runtime,
+                                                          const struct zaclr_boxed_value_desc* boxed_value,
+                                                          struct zaclr_token token,
+                                                          const struct zaclr_loaded_assembly** out_assembly,
+                                                          struct zaclr_method_table** out_method_table,
+                                                          const struct zaclr_field_layout** out_layout)
+    {
+        const struct zaclr_type_desc* type_desc = NULL;
+        struct zaclr_token value_type_token;
+        uint32_t index;
+        struct zaclr_result result;
+
+        if (runtime == NULL || boxed_value == NULL || out_assembly == NULL || out_method_table == NULL || out_layout == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        *out_assembly = NULL;
+        *out_method_table = NULL;
+        *out_layout = NULL;
+        value_type_token = zaclr_token_make(boxed_value->type_token_raw);
+        if (!zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        result = zaclr_type_system_resolve_type_desc(zaclr_object_owning_assembly(&boxed_value->object),
+                                                     runtime,
+                                                     value_type_token,
+                                                     out_assembly,
+                                                     &type_desc);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            console_write("[ZACLR][boxed] resolve type failed token=");
+            console_write_hex64((uint64_t)value_type_token.raw);
+            console_write(" status=");
+            console_write_hex64((uint64_t)result.status);
+            console_write(" category=");
+            console_write_hex64((uint64_t)result.category);
+            console_write("\n");
+            return result;
+        }
+
+        if (*out_assembly == NULL || type_desc == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        result = zaclr_type_prepare(runtime,
+                                    (struct zaclr_loaded_assembly*)*out_assembly,
+                                    type_desc,
+                                    out_method_table);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        if (*out_method_table == NULL || (*out_method_table)->instance_fields == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        for (index = 0u; index < (*out_method_table)->instance_field_count; ++index)
+        {
+            const struct zaclr_field_layout* layout = &(*out_method_table)->instance_fields[index];
+            if (layout->is_static == 0u && layout->field_token_row == zaclr_token_row(&token))
+            {
+                *out_layout = layout;
+                return zaclr_result_ok();
+            }
+        }
+
+        console_write("[ZACLR][boxed] layout miss boxed_type_token=");
+        console_write_hex64((uint64_t)boxed_value->type_token_raw);
+        console_write(" field_token=");
+        console_write_hex64((uint64_t)token.raw);
+        console_write(" field_count=");
+        console_write_dec((uint64_t)(*out_method_table)->instance_field_count);
+        console_write(" first_field=");
+        console_write_hex64((uint64_t)((*out_method_table)->instance_field_count != 0u ? (*out_method_table)->instance_fields[0].field_token_row : 0u));
+        console_write("\n");
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
     }
 }
 
 extern "C" uint32_t zaclr_object_flags(const struct zaclr_object_desc* object)
 {
-    return object != NULL ? object->flags : 0u;
+    return object != NULL ? object->header.flags : 0u;
 }
 
 extern "C" uint32_t zaclr_object_size_bytes(const struct zaclr_object_desc* object)
@@ -64,7 +483,7 @@ extern "C" uint32_t zaclr_object_family(const struct zaclr_object_desc* object)
 
 extern "C" uint32_t zaclr_object_contains_references(const struct zaclr_object_desc* object)
 {
-    return object != NULL && (object->flags & ZACLR_OBJECT_FLAG_CONTAINS_REFERENCES) != 0u;
+    return object != NULL && (object->header.flags & ZACLR_OBJECT_FLAG_CONTAINS_REFERENCES) != 0u;
 }
 
 extern "C" uint32_t zaclr_object_is_marked(const struct zaclr_object_desc* object)
@@ -80,20 +499,62 @@ extern "C" void zaclr_object_set_marked(struct zaclr_object_desc* object, uint32
     }
 }
 
+extern "C" struct zaclr_method_table* zaclr_object_method_table(struct zaclr_object_desc* object)
+{
+    return object != NULL ? object->header.method_table : NULL;
+}
+
+extern "C" const struct zaclr_method_table* zaclr_object_method_table_const(const struct zaclr_object_desc* object)
+{
+    return object != NULL ? object->header.method_table : NULL;
+}
+
+extern "C" const struct zaclr_loaded_assembly* zaclr_object_owning_assembly(const struct zaclr_object_desc* object)
+{
+    if (object == NULL)
+    {
+        return NULL;
+    }
+
+    if (object->header.method_table != NULL && object->header.method_table->assembly != NULL)
+    {
+        return object->header.method_table->assembly;
+    }
+
+    return object->owning_assembly;
+}
+
+extern "C" zaclr_type_id zaclr_object_type_id(const struct zaclr_object_desc* object)
+{
+    if (object == NULL)
+    {
+        return 0u;
+    }
+
+    if (object->header.method_table != NULL
+        && object->header.method_table->type_desc != NULL
+        && zaclr_token_matches_table(&object->header.method_table->type_desc->token, ZACLR_TOKEN_TABLE_TYPEDEF))
+    {
+        return zaclr_token_row(&object->header.method_table->type_desc->token);
+    }
+
+    return object->type_id;
+}
+
 extern "C" struct zaclr_result zaclr_boxed_value_allocate(struct zaclr_heap* heap,
-                                                            struct zaclr_token token,
-                                                            const struct zaclr_stack_value* value,
-                                                            zaclr_object_handle* out_handle)
+                                                             struct zaclr_token token,
+                                                             const struct zaclr_stack_value* value,
+                                                             struct zaclr_boxed_value_desc** out_value)
 {
     struct zaclr_boxed_value_desc* boxed_value;
     struct zaclr_result result;
 
-    if (heap == NULL || value == NULL || out_handle == NULL)
+    if (heap == NULL || value == NULL || out_value == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    *out_handle = 0u;
+    *out_value = NULL;
     result = zaclr_heap_allocate_object(heap,
                                         sizeof(struct zaclr_boxed_value_desc),
                                         NULL,
@@ -109,7 +570,31 @@ extern "C" struct zaclr_result zaclr_boxed_value_allocate(struct zaclr_heap* hea
     boxed_value->type_token_raw = token.raw;
     boxed_value->reserved = 0u;
     boxed_value->value = *value;
-    *out_handle = boxed_value->object.handle;
+    *out_value = boxed_value;
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_boxed_value_allocate_handle(struct zaclr_heap* heap,
+                                                                    struct zaclr_token token,
+                                                                    const struct zaclr_stack_value* value,
+                                                                    zaclr_object_handle* out_handle)
+{
+    struct zaclr_boxed_value_desc* boxed_value;
+    struct zaclr_result result;
+
+    if (out_handle == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    *out_handle = 0u;
+    result = zaclr_boxed_value_allocate(heap, token, value, &boxed_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    *out_handle = zaclr_heap_get_object_handle(heap, &boxed_value->object);
     return zaclr_result_ok();
 }
 
@@ -130,42 +615,170 @@ extern "C" struct zaclr_result zaclr_reference_object_allocate(struct zaclr_heap
                                                                   zaclr_type_id type_id,
                                                                   struct zaclr_token type_token,
                                                                   uint32_t field_capacity,
-                                                                  zaclr_object_handle* out_handle)
+                                                                  struct zaclr_reference_object_desc** out_object)
 {
     struct zaclr_reference_object_desc* object;
     struct zaclr_result result;
-    uint32_t* field_tokens;
-    struct zaclr_stack_value* field_values;
+    struct zaclr_method_table* method_table = NULL;
+    const struct zaclr_type_desc* type_desc = NULL;
+    uint32_t compatibility_field_capacity;
 
-    if (heap == NULL || out_handle == NULL)
+    if (heap == NULL || out_object == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    *out_handle = 0u;
+    if (heap->runtime != NULL && owning_assembly != NULL && zaclr_token_matches_table(&type_token, ZACLR_TOKEN_TABLE_TYPEDEF))
+    {
+        type_desc = zaclr_type_map_find_by_token(&owning_assembly->type_map, type_token);
+        if (type_desc != NULL)
+        {
+            result = zaclr_type_prepare(heap->runtime,
+                                        (struct zaclr_loaded_assembly*)owning_assembly,
+                                        type_desc,
+                                        &method_table);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+        }
+    }
+
+    *out_object = NULL;
+    compatibility_field_capacity = (method_table != NULL && zaclr_method_table_is_prepared(method_table) != 0u)
+        ? 0u
+        : field_capacity;
+
     result = zaclr_heap_allocate_object(heap,
-                                        zaclr_reference_object_allocation_size(field_capacity),
+                                        zaclr_reference_object_allocation_size(method_table, compatibility_field_capacity),
                                         owning_assembly,
                                         type_id,
                                         ZACLR_OBJECT_FAMILY_INSTANCE,
-                                        ZACLR_OBJECT_FLAG_REFERENCE_TYPE | ZACLR_OBJECT_FLAG_CONTAINS_REFERENCES,
+                                        ZACLR_OBJECT_FLAG_REFERENCE_TYPE
+                                            | ((method_table != NULL && zaclr_method_table_contains_references(method_table) != 0u)
+                                                   ? (uint32_t)ZACLR_OBJECT_FLAG_CONTAINS_REFERENCES
+                                                   : 0u),
                                         (struct zaclr_object_desc**)&object);
     if (result.status != ZACLR_STATUS_OK)
     {
         return result;
     }
 
-    object->type_token_raw = type_token.raw;
-    object->field_capacity = field_capacity;
-    field_tokens = zaclr_reference_object_field_tokens(object);
-    field_values = zaclr_reference_object_field_values(object);
-    if (field_capacity != 0u)
+    object->object.header.method_table = method_table;
+    object->compatibility_field_capacity = compatibility_field_capacity;
+    object->reserved = 0u;
+    *out_object = object;
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_reference_object_allocate_handle(struct zaclr_heap* heap,
+                                                                        const struct zaclr_loaded_assembly* owning_assembly,
+                                                                        zaclr_type_id type_id,
+                                                                        struct zaclr_token type_token,
+                                                                        uint32_t field_capacity,
+                                                                        zaclr_object_handle* out_handle)
+{
+    struct zaclr_reference_object_desc* object;
+    struct zaclr_result result;
+
+    if (out_handle == NULL)
     {
-        kernel_memset(field_tokens, 0, sizeof(uint32_t) * (size_t)field_capacity);
-        kernel_memset(field_values, 0, sizeof(struct zaclr_stack_value) * (size_t)field_capacity);
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    *out_handle = object->object.handle;
+    *out_handle = 0u;
+    result = zaclr_reference_object_allocate(heap, owning_assembly, type_id, type_token, field_capacity, &object);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    *out_handle = zaclr_heap_get_object_handle(heap, &object->object);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* heap,
+                                                             const struct zaclr_loaded_assembly* type_assembly,
+                                                             struct zaclr_token type_token,
+                                                             struct zaclr_runtime_type_desc** out_runtime_type)
+{
+    struct zaclr_runtime_type_desc* runtime_type;
+    struct zaclr_result result;
+    struct zaclr_method_table* method_table = NULL;
+    const struct zaclr_type_desc* runtime_type_desc = NULL;
+
+    if (heap == NULL || out_runtime_type == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    if (heap->runtime != NULL)
+    {
+        const struct zaclr_app_domain* domain = zaclr_runtime_current_domain(heap->runtime);
+        const struct zaclr_loaded_assembly* corelib = NULL;
+        if (domain != NULL)
+        {
+            corelib = zaclr_assembly_registry_find_by_name(&domain->registry, "System.Private.CoreLib");
+        }
+        if (corelib != NULL)
+        {
+            struct zaclr_member_name_ref type_name = {"System", "RuntimeType", NULL};
+            runtime_type_desc = zaclr_type_system_find_type_by_name(corelib, &type_name);
+            if (runtime_type_desc != NULL)
+            {
+                result = zaclr_type_prepare(heap->runtime,
+                                            (struct zaclr_loaded_assembly*)corelib,
+                                            runtime_type_desc,
+                                            &method_table);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+            }
+        }
+    }
+
+    *out_runtime_type = NULL;
+    result = zaclr_heap_allocate_object(heap,
+                                        sizeof(struct zaclr_runtime_type_desc),
+                                        type_assembly,
+                                        0u,
+                                        ZACLR_OBJECT_FAMILY_RUNTIME_TYPE,
+                                        ZACLR_OBJECT_FLAG_REFERENCE_TYPE,
+                                        (struct zaclr_object_desc**)&runtime_type);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    runtime_type->object.header.method_table = method_table;
+    runtime_type->type_assembly = type_assembly;
+    runtime_type->type_token = type_token;
+    *out_runtime_type = runtime_type;
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_runtime_type_allocate_handle(struct zaclr_heap* heap,
+                                                                    const struct zaclr_loaded_assembly* type_assembly,
+                                                                    struct zaclr_token type_token,
+                                                                    zaclr_object_handle* out_handle)
+{
+    struct zaclr_runtime_type_desc* runtime_type;
+    struct zaclr_result result;
+
+    if (out_handle == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    *out_handle = 0u;
+    result = zaclr_runtime_type_allocate(heap, type_assembly, type_token, &runtime_type);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    *out_handle = zaclr_heap_get_object_handle(heap, &runtime_type->object);
     return zaclr_result_ok();
 }
 
@@ -175,62 +788,120 @@ extern "C" struct zaclr_reference_object_desc* zaclr_reference_object_from_handl
     return (struct zaclr_reference_object_desc*)zaclr_heap_get_object(heap, handle);
 }
 
+extern "C" struct zaclr_runtime_type_desc* zaclr_runtime_type_from_handle(struct zaclr_heap* heap,
+                                                                           zaclr_object_handle handle)
+{
+    return (struct zaclr_runtime_type_desc*)zaclr_heap_get_object(heap, handle);
+}
+
 extern "C" const struct zaclr_reference_object_desc* zaclr_reference_object_from_handle_const(const struct zaclr_heap* heap,
                                                                                                 zaclr_object_handle handle)
 {
     return (const struct zaclr_reference_object_desc*)zaclr_heap_get_object(heap, handle);
 }
 
-extern "C" struct zaclr_result zaclr_reference_object_store_field(struct zaclr_reference_object_desc* object,
-                                                                     struct zaclr_token token,
-                                                                     const struct zaclr_stack_value* value)
+extern "C" const struct zaclr_runtime_type_desc* zaclr_runtime_type_from_handle_const(const struct zaclr_heap* heap,
+                                                                                        zaclr_object_handle handle)
 {
-    uint32_t index;
-    uint32_t* field_tokens;
-    struct zaclr_stack_value* field_values;
+    return (const struct zaclr_runtime_type_desc*)zaclr_heap_get_object(heap, handle);
+}
+
+extern "C" const struct zaclr_field_layout* zaclr_reference_object_field_layout(const struct zaclr_reference_object_desc* object,
+                                                                                  struct zaclr_token token)
+{
+    return find_field_layout(&object->object, token);
+}
+
+extern "C" void* zaclr_reference_object_field_address(struct zaclr_reference_object_desc* object,
+                                                       struct zaclr_token token)
+{
+    return object_instance_field_address(&object->object, token);
+}
+
+extern "C" const void* zaclr_reference_object_field_address_const(const struct zaclr_reference_object_desc* object,
+                                                                   struct zaclr_token token)
+{
+    return object_instance_field_address_const(&object->object, token);
+}
+
+extern "C" struct zaclr_result zaclr_reference_object_store_field(struct zaclr_reference_object_desc* object,
+                                                                   struct zaclr_token token,
+                                                                   const struct zaclr_stack_value* value)
+{
+    const struct zaclr_field_layout* layout;
+    void* address;
 
     if (object == NULL || value == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    field_tokens = zaclr_reference_object_field_tokens(object);
-    field_values = zaclr_reference_object_field_values(object);
-
-    for (index = 0u; index < object->field_capacity; ++index)
+    layout = find_field_layout(&object->object, token);
+    if (layout != NULL)
     {
-        if (field_tokens[index] == token.raw || field_tokens[index] == 0u)
+        address = zaclr_reference_object_field_address(object, token);
+        return store_field_value(address, layout, value);
+    }
+
+    if (object->compatibility_field_capacity != 0u)
+    {
+        uint32_t slot = 0u;
+        struct zaclr_stack_value* fields = (struct zaclr_stack_value*)reference_data(object);
+        if (compatibility_slot_for_token(object, token, &slot) && slot < object->compatibility_field_capacity)
         {
-            field_tokens[index] = token.raw;
-            field_values[index] = *value;
-            return zaclr_result_ok();
+            return zaclr_stack_value_assign(&fields[slot], value);
         }
     }
 
-    return zaclr_result_make(ZACLR_STATUS_BUFFER_TOO_SMALL, ZACLR_STATUS_CATEGORY_HEAP);
+    console_write("[ZACLR][object] store field miss token_row=");
+    console_write_dec((uint64_t)zaclr_token_row(&token));
+    console_write(" type_id=");
+    console_write_dec((uint64_t)object->object.type_id);
+    console_write(" method_table=");
+    console_write_hex64((uint64_t)(uintptr_t)object->object.header.method_table);
+    console_write(" mt_field_list=");
+    console_write_dec((uint64_t)(object->object.header.method_table != NULL && object->object.header.method_table->type_desc != NULL
+        ? object->object.header.method_table->type_desc->field_list
+        : 0u));
+    console_write(" mt_field_count=");
+    console_write_dec((uint64_t)(object->object.header.method_table != NULL && object->object.header.method_table->type_desc != NULL
+        ? object->object.header.method_table->type_desc->field_count
+        : 0u));
+    console_write(" instance_field_count=");
+    console_write_dec((uint64_t)(object->object.header.method_table != NULL ? object->object.header.method_table->instance_field_count : 0u));
+    console_write(" compat_capacity=");
+    console_write_dec((uint64_t)object->compatibility_field_capacity);
+    console_write("\n");
+
+    return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
 }
 
 extern "C" struct zaclr_result zaclr_reference_object_load_field(const struct zaclr_reference_object_desc* object,
-                                                                    struct zaclr_token token,
-                                                                    struct zaclr_stack_value* out_value)
+                                                                  struct zaclr_token token,
+                                                                  struct zaclr_stack_value* out_value)
 {
-    uint32_t index;
-    const uint32_t* field_tokens;
-    const struct zaclr_stack_value* field_values;
+    const struct zaclr_field_layout* layout;
+    const void* address;
 
     if (object == NULL || out_value == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    field_tokens = zaclr_reference_object_field_tokens_const(object);
-    field_values = zaclr_reference_object_field_values_const(object);
-
-    for (index = 0u; index < object->field_capacity; ++index)
+    layout = find_field_layout(&object->object, token);
+    if (layout != NULL)
     {
-        if (field_tokens[index] == token.raw)
+        address = zaclr_reference_object_field_address_const(object, token);
+        return load_field_value(address, layout, out_value);
+    }
+
+    if (object->compatibility_field_capacity != 0u)
+    {
+        uint32_t slot = 0u;
+        const struct zaclr_stack_value* fields = (const struct zaclr_stack_value*)reference_data_const(object);
+        if (compatibility_slot_for_token(object, token, &slot) && slot < object->compatibility_field_capacity)
         {
-            *out_value = field_values[index];
+            *out_value = fields[slot];
             return zaclr_result_ok();
         }
     }
@@ -241,47 +912,56 @@ extern "C" struct zaclr_result zaclr_reference_object_load_field(const struct za
 extern "C" struct zaclr_stack_value* zaclr_reference_object_field_storage(struct zaclr_reference_object_desc* object,
                                                                             struct zaclr_token token)
 {
-    uint32_t* field_tokens;
-    struct zaclr_stack_value* field_values;
-    uint32_t index;
-
-    if (object == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
-    {
-        return NULL;
-    }
-
-    field_tokens = zaclr_reference_object_field_tokens(object);
-    field_values = zaclr_reference_object_field_values(object);
-    for (index = 0u; index < object->field_capacity; ++index)
-    {
-        if (field_tokens[index] == token.raw)
-        {
-            return &field_values[index];
-        }
-    }
-
-    return NULL;
+    return (struct zaclr_stack_value*)zaclr_reference_object_field_address(object, token);
 }
 
 extern "C" const struct zaclr_stack_value* zaclr_reference_object_field_storage_const(const struct zaclr_reference_object_desc* object,
                                                                                          struct zaclr_token token)
 {
-    return zaclr_reference_object_field_storage((struct zaclr_reference_object_desc*)object, token);
+    return (const struct zaclr_stack_value*)zaclr_reference_object_field_address_const(object, token);
+}
+
+extern "C" struct zaclr_result zaclr_boxed_value_store_field(struct zaclr_runtime* runtime,
+                                                               struct zaclr_boxed_value_desc* boxed_value,
+                                                               struct zaclr_token token,
+                                                               const struct zaclr_stack_value* value)
+{
+    const struct zaclr_loaded_assembly* type_assembly = NULL;
+    struct zaclr_method_table* method_table = NULL;
+    const struct zaclr_field_layout* layout = NULL;
+    uint8_t* value_bytes;
+    void* field_address;
+
+    if (runtime == NULL || boxed_value == NULL || value == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    if (boxed_value_prepare_layout(runtime, boxed_value, token, &type_assembly, &method_table, &layout).status != ZACLR_STATUS_OK)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    value_bytes = (uint8_t*)zaclr_stack_value_payload(&boxed_value->value);
+    if (value_bytes == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    field_address = value_bytes + layout->byte_offset;
+    return store_field_value(field_address, layout, value);
 }
 
 extern "C" struct zaclr_result zaclr_object_store_field(struct zaclr_runtime* runtime,
-                                                          zaclr_object_handle handle,
+                                                          struct zaclr_object_desc* object,
                                                           struct zaclr_token token,
                                                           const struct zaclr_stack_value* value)
 {
-    struct zaclr_object_desc* object;
-
     if (runtime == NULL || value == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    object = zaclr_heap_get_object(&runtime->heap, handle);
     if (object == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
@@ -289,18 +969,7 @@ extern "C" struct zaclr_result zaclr_object_store_field(struct zaclr_runtime* ru
 
     if ((zaclr_object_flags(object) & ZACLR_OBJECT_FLAG_BOXED_VALUE) != 0u)
     {
-        struct zaclr_boxed_value_desc* boxed_value = (struct zaclr_boxed_value_desc*)object;
-        if (zaclr_token_row(&token) == 1u || zaclr_token_row(&token) == 23u || zaclr_token_row(&token) == 25u)
-        {
-            boxed_value->value = *value;
-            return zaclr_result_ok();
-        }
-
-        if (zaclr_token_row(&token) == 24u)
-        {
-            boxed_value->reserved = value->kind == ZACLR_STACK_VALUE_I4 ? (uint32_t)value->data.i4 : 0u;
-            return zaclr_result_ok();
-        }
+        return zaclr_boxed_value_store_field(runtime, (struct zaclr_boxed_value_desc*)object, token, value);
     }
 
     if ((zaclr_object_flags(object) & ZACLR_OBJECT_FLAG_REFERENCE_TYPE) != 0u)
@@ -311,19 +980,60 @@ extern "C" struct zaclr_result zaclr_object_store_field(struct zaclr_runtime* ru
     return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
 }
 
+extern "C" struct zaclr_result zaclr_object_store_field_handle(struct zaclr_runtime* runtime,
+                                                                 zaclr_object_handle handle,
+                                                                 struct zaclr_token token,
+                                                                 const struct zaclr_stack_value* value)
+{
+    if (runtime == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    return zaclr_object_store_field(runtime, zaclr_heap_get_object(&runtime->heap, handle), token, value);
+}
+
+extern "C" struct zaclr_result zaclr_boxed_value_load_field(struct zaclr_runtime* runtime,
+                                                              const struct zaclr_boxed_value_desc* boxed_value,
+                                                              struct zaclr_token token,
+                                                              struct zaclr_stack_value* out_value)
+{
+    const struct zaclr_loaded_assembly* type_assembly = NULL;
+    struct zaclr_method_table* method_table = NULL;
+    const struct zaclr_field_layout* layout = NULL;
+    const uint8_t* value_bytes;
+    const void* field_address;
+
+    if (runtime == NULL || boxed_value == NULL || out_value == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    if (boxed_value_prepare_layout(runtime, boxed_value, token, &type_assembly, &method_table, &layout).status != ZACLR_STATUS_OK)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    value_bytes = (const uint8_t*)zaclr_stack_value_payload_const(&boxed_value->value);
+    if (value_bytes == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    field_address = value_bytes + layout->byte_offset;
+    return load_field_value(field_address, layout, out_value);
+}
+
 extern "C" struct zaclr_result zaclr_object_load_field(struct zaclr_runtime* runtime,
-                                                         zaclr_object_handle handle,
+                                                         const struct zaclr_object_desc* object,
                                                          struct zaclr_token token,
                                                          struct zaclr_stack_value* out_value)
 {
-    struct zaclr_object_desc* object;
-
     if (runtime == NULL || out_value == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
     }
 
-    object = zaclr_heap_get_object(&runtime->heap, handle);
     if (object == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
@@ -331,44 +1041,39 @@ extern "C" struct zaclr_result zaclr_object_load_field(struct zaclr_runtime* run
 
     if ((zaclr_object_flags(object) & ZACLR_OBJECT_FLAG_BOXED_VALUE) != 0u)
     {
-        struct zaclr_boxed_value_desc* boxed_value = (struct zaclr_boxed_value_desc*)object;
-        if (zaclr_token_row(&token) == 1u || zaclr_token_row(&token) == 23u || zaclr_token_row(&token) == 25u)
-        {
-            *out_value = boxed_value->value;
-            return zaclr_result_ok();
-        }
-
-        if (zaclr_token_row(&token) == 24u)
-        {
-            out_value->kind = ZACLR_STACK_VALUE_I4;
-            out_value->data.i4 = (int32_t)boxed_value->reserved;
-            return zaclr_result_ok();
-        }
+        return zaclr_boxed_value_load_field(runtime, (const struct zaclr_boxed_value_desc*)object, token, out_value);
     }
 
     if ((zaclr_object_flags(object) & ZACLR_OBJECT_FLAG_REFERENCE_TYPE) != 0u)
     {
-        const char* field_name = NULL;
-        const struct zaclr_loaded_assembly* field_assembly = object->owning_assembly != NULL
-            ? object->owning_assembly
-            : zaclr_assembly_registry_find_by_name(&runtime->assemblies, "System.Private.CoreLib");
-        if ((zaclr_object_flags(object) & ZACLR_OBJECT_FLAG_STRING) != 0u
-            && zaclr_try_get_field_name(field_assembly, token, &field_name))
+        if (zaclr_object_family(object) == ZACLR_OBJECT_FAMILY_STRING
+            || zaclr_object_family(object) == ZACLR_OBJECT_FAMILY_RUNTIME_TYPE)
         {
-            const struct zaclr_string_desc* string_object = (const struct zaclr_string_desc*)object;
-            if (zaclr_text_equals(field_name, "_stringLength") || zaclr_text_equals(field_name, "m_stringLength"))
+            const struct zaclr_field_layout* layout = find_field_layout(object, token);
+            const void* address = object_instance_field_address_const(object, token);
+            if (layout != NULL && address != NULL)
             {
-                out_value->kind = ZACLR_STACK_VALUE_I4;
-                out_value->data.i4 = (int32_t)zaclr_string_length(string_object);
+                return load_field_value(address, layout, out_value);
+            }
+
+            if (zaclr_object_family(object) == ZACLR_OBJECT_FAMILY_RUNTIME_TYPE)
+            {
+                /* RuntimeTypeHandle.m_type field access pattern:
+                   In .NET, GetTypeFromHandle(RuntimeTypeHandle handle) does
+                   ldfld RuntimeTypeHandle::m_type to extract the Type from the
+                   handle struct.  In ZACLR, ldtoken materializes a RuntimeType
+                   object directly (not wrapped in a RuntimeTypeHandle value type).
+                   When ldfld on a RUNTIME_TYPE object fails to find the field in
+                   the RuntimeType hierarchy, it means the IL is accessing the
+                   RuntimeTypeHandle.m_type wrapper field.  The correct result is
+                   the RuntimeType object itself since it IS the m_type value. */
+                *out_value = {};
+                out_value->kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+                out_value->data.object_reference = (struct zaclr_object_desc*)object;
                 return zaclr_result_ok();
             }
 
-            if (zaclr_text_equals(field_name, "_firstChar") || zaclr_text_equals(field_name, "m_firstChar"))
-            {
-                out_value->kind = ZACLR_STACK_VALUE_I4;
-                out_value->data.i4 = (int32_t)zaclr_string_char_at(string_object, 0u);
-                return zaclr_result_ok();
-            }
+            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
         }
 
         return zaclr_reference_object_load_field((const struct zaclr_reference_object_desc*)object, token, out_value);
@@ -377,28 +1082,17 @@ extern "C" struct zaclr_result zaclr_object_load_field(struct zaclr_runtime* run
     return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
 }
 
-extern "C" uint32_t* zaclr_reference_object_field_tokens(struct zaclr_reference_object_desc* object)
+extern "C" struct zaclr_result zaclr_object_load_field_handle(struct zaclr_runtime* runtime,
+                                                                zaclr_object_handle handle,
+                                                                struct zaclr_token token,
+                                                                struct zaclr_stack_value* out_value)
 {
-    return object != NULL ? (uint32_t*)(object + 1) : NULL;
-}
+    if (runtime == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
 
-extern "C" const uint32_t* zaclr_reference_object_field_tokens_const(const struct zaclr_reference_object_desc* object)
-{
-    return object != NULL ? (const uint32_t*)(object + 1) : NULL;
-}
-
-extern "C" struct zaclr_stack_value* zaclr_reference_object_field_values(struct zaclr_reference_object_desc* object)
-{
-    return object != NULL
-        ? (struct zaclr_stack_value*)(zaclr_reference_object_field_tokens(object) + object->field_capacity)
-        : NULL;
-}
-
-extern "C" const struct zaclr_stack_value* zaclr_reference_object_field_values_const(const struct zaclr_reference_object_desc* object)
-{
-    return object != NULL
-        ? (const struct zaclr_stack_value*)(zaclr_reference_object_field_tokens_const(object) + object->field_capacity)
-        : NULL;
+    return zaclr_object_load_field(runtime, zaclr_heap_get_object(&runtime->heap, handle), token, out_value);
 }
 
 extern "C" uint32_t zaclr_stack_value_contains_references(const struct zaclr_stack_value* value)
@@ -408,5 +1102,14 @@ extern "C" uint32_t zaclr_stack_value_contains_references(const struct zaclr_sta
         return 0u;
     }
 
-    return value->kind == ZACLR_STACK_VALUE_OBJECT_HANDLE && value->data.object_handle != 0u;
+    return value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE && value->data.object_reference != NULL;
+}
+
+extern "C" void zaclr_gc_write_barrier(struct zaclr_object_desc** slot,
+                                         struct zaclr_object_desc* value)
+{
+    if (slot != NULL)
+    {
+        *slot = value;
+    }
 }

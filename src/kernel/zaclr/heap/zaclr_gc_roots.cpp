@@ -12,7 +12,7 @@ namespace
     {
         uint32_t index;
 
-        if (values == NULL || visitor == NULL || visitor->visit_handle == NULL)
+        if (values == NULL || visitor == NULL || visitor->visit_object_reference == NULL)
         {
             return;
         }
@@ -20,9 +20,9 @@ namespace
         for (index = 0u; index < count; ++index)
         {
             struct zaclr_stack_value* value = &values[index];
-            if (value->kind == ZACLR_STACK_VALUE_OBJECT_HANDLE && value->data.object_handle != 0u)
+            if (value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE && value->data.object_reference != NULL)
             {
-                visitor->visit_handle(&value->data.object_handle, flags, visitor->context);
+                visitor->visit_object_reference(&value->data.object_reference, flags, visitor->context);
             }
         }
     }
@@ -47,7 +47,7 @@ namespace
         uint32_t index;
         struct zaclr_gc_handle_entry* entry;
 
-        if (handle_table == NULL || visitor == NULL || visitor->visit_handle == NULL)
+        if (handle_table == NULL || visitor == NULL || visitor->visit_object_reference == NULL)
         {
             return;
         }
@@ -66,9 +66,15 @@ namespace
                 continue;
             }
 
-            visitor->visit_handle(&entry->handle,
-                                  ZACLR_GC_ROOT_FLAG_HANDLE_TABLE,
-                                  visitor->context);
+            {
+                struct zaclr_object_desc* object = zaclr_heap_get_object(NULL, entry->handle);
+                if (object != NULL)
+                {
+                    visitor->visit_object_reference(&object,
+                                                    ZACLR_GC_ROOT_FLAG_HANDLE_TABLE,
+                                                    visitor->context);
+                }
+            }
         }
     }
 }
@@ -101,16 +107,16 @@ extern "C" void zaclr_gc_enumerate_thread_roots(struct zaclr_thread* thread,
 {
     struct zaclr_frame* frame;
 
-    if (thread == NULL || visitor == NULL || visitor->visit_handle == NULL)
+    if (thread == NULL || visitor == NULL || visitor->visit_object_reference == NULL)
     {
         return;
     }
 
-    if (thread->current_exception != 0u)
+    if (thread->current_exception != NULL)
     {
-        visitor->visit_handle(&thread->current_exception,
-                              ZACLR_GC_ROOT_FLAG_THREAD_EXCEPTION,
-                              visitor->context);
+        visitor->visit_object_reference(&thread->current_exception,
+                                        ZACLR_GC_ROOT_FLAG_THREAD_EXCEPTION,
+                                        visitor->context);
     }
 
     for (frame = current_frame; frame != NULL; frame = frame->parent)
@@ -133,8 +139,12 @@ extern "C" void zaclr_gc_enumerate_runtime_roots(struct zaclr_runtime* runtime,
     zaclr_gc_enumerate_handle_table_roots(&runtime->boot_launch.handle_table, visitor);
     zaclr_gc_enumerate_thread_roots(&runtime->boot_launch.thread, runtime->active_frame, visitor);
 
-    for (assembly_index = 0u; assembly_index < runtime->assemblies.count; ++assembly_index)
+    struct zaclr_app_domain* domain = zaclr_runtime_current_domain(runtime);
+    if (domain != NULL)
     {
-        zaclr_gc_enumerate_assembly_static_roots(&runtime->assemblies.entries[assembly_index], visitor);
+        for (assembly_index = 0u; assembly_index < domain->registry.count; ++assembly_index)
+        {
+            zaclr_gc_enumerate_assembly_static_roots(&domain->registry.entries[assembly_index], visitor);
+        }
     }
 }

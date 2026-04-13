@@ -25,11 +25,11 @@ struct zaclr_result zaclr_engine_execute_method(struct zaclr_engine* engine,
                                                 const struct zaclr_loaded_assembly* assembly,
                                                 const struct zaclr_method_desc* method);
 struct zaclr_result zaclr_engine_execute_instance_method(struct zaclr_engine* engine,
-                                                         struct zaclr_runtime* runtime,
-                                                         struct zaclr_launch_state* launch_state,
-                                                         const struct zaclr_loaded_assembly* assembly,
-                                                         const struct zaclr_method_desc* method,
-                                                         zaclr_object_handle instance_handle);
+                                                          struct zaclr_runtime* runtime,
+                                                          struct zaclr_launch_state* launch_state,
+                                                          const struct zaclr_loaded_assembly* assembly,
+                                                          const struct zaclr_method_desc* method,
+                                                          struct zaclr_object_desc* instance);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,559 @@
+Type: Coffee.UIExtensions.UIEffectCapturedImage:
+	Base Class: 
+		UnityEngine.UI.RawImage
+
+	Interfaces:
+
+	Nested Types:
+		Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+		Coffee.UIExtensions.UIEffectCapturedImage/<_CoUpdateTextureOnNextFrame>d__95
+
+	Static Field: shaderName
+		Type: System.String
+		Offset in Defining Type: 0x0
+		Has Default: True
+		Default Value: UI/Hidden/UI-EffectCapture
+
+	Static Field: s_CopyId
+		Type: System.Int32
+		Offset in Defining Type: 0x0
+		Has Default: False
+
+	Static Field: s_EffectId1
+		Type: System.Int32
+		Offset in Defining Type: 0x4
+		Has Default: False
+
+	Static Field: s_EffectId2
+		Type: System.Int32
+		Offset in Defining Type: 0x8
+		Has Default: False
+
+	Static Field: s_EffectFactorId
+		Type: System.Int32
+		Offset in Defining Type: 0xC
+		Has Default: False
+
+	Static Field: s_ColorFactorId
+		Type: System.Int32
+		Offset in Defining Type: 0x10
+		Has Default: False
+
+	Static Field: s_CommandBuffer
+		Type: UnityEngine.Rendering.CommandBuffer
+		Offset in Defining Type: 0x18
+		Has Default: False
+
+	Field: m_EffectFactor
+		Type: System.Single
+		Offset in Defining Type: 0xE8
+		Has Default: False
+
+	Field: m_ColorFactor
+		Type: System.Single
+		Offset in Defining Type: 0xEC
+		Has Default: False
+
+	Field: m_BlurFactor
+		Type: System.Single
+		Offset in Defining Type: 0xF0
+		Has Default: False
+
+	Field: m_EffectMode
+		Type: Coffee.UIExtensions.EffectMode
+		Offset in Defining Type: 0xF4
+		Has Default: False
+
+	Field: m_ColorMode
+		Type: Coffee.UIExtensions.ColorMode
+		Offset in Defining Type: 0xF8
+		Has Default: False
+
+	Field: m_BlurMode
+		Type: Coffee.UIExtensions.BlurMode
+		Offset in Defining Type: 0xFC
+		Has Default: False
+
+	Field: m_EffectColor
+		Type: UnityEngine.Color
+		Offset in Defining Type: 0x100
+		Has Default: False
+
+	Field: m_DesamplingRate
+		Type: Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+		Offset in Defining Type: 0x110
+		Has Default: False
+
+	Field: m_ReductionRate
+		Type: Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+		Offset in Defining Type: 0x114
+		Has Default: False
+
+	Field: m_FilterMode
+		Type: UnityEngine.FilterMode
+		Offset in Defining Type: 0x118
+		Has Default: False
+
+	Field: m_EffectMaterial
+		Type: UnityEngine.Material
+		Offset in Defining Type: 0x120
+		Has Default: False
+
+	Field: m_BlurIterations
+		Type: System.Int32
+		Offset in Defining Type: 0x128
+		Has Default: False
+
+	Field: m_FitToScreen
+		Type: System.Boolean
+		Offset in Defining Type: 0x12C
+		Has Default: False
+
+	Field: m_CaptureOnEnable
+		Type: System.Boolean
+		Offset in Defining Type: 0x12D
+		Has Default: False
+
+	Field: m_ImmediateCapturing
+		Type: System.Boolean
+		Offset in Defining Type: 0x12E
+		Has Default: False
+
+	Field: _rt
+		Type: UnityEngine.RenderTexture
+		Offset in Defining Type: 0x130
+		Has Default: False
+
+	Method: get_toneLevel:
+		Accessibility: Public
+		Return Type: System.Single
+		File Offset 0x014C7210
+		Ram Offset 0x014c7210
+		Virtual Method Slot: 65535
+
+	Method: set_toneLevel:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C7218
+		Ram Offset 0x014c7218
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Single
+			Default Value: 
+	Method: get_effectFactor:
+		Accessibility: Public
+		Return Type: System.Single
+		File Offset 0x014C7234
+		Ram Offset 0x014c7234
+		Virtual Method Slot: 65535
+
+	Method: set_effectFactor:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C723C
+		Ram Offset 0x014c723c
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Single
+			Default Value: 
+	Method: get_colorFactor:
+		Accessibility: Public
+		Return Type: System.Single
+		File Offset 0x014C7258
+		Ram Offset 0x014c7258
+		Virtual Method Slot: 65535
+
+	Method: set_colorFactor:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C7260
+		Ram Offset 0x014c7260
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Single
+			Default Value: 
+	Method: get_blur:
+		Accessibility: Public
+		Return Type: System.Single
+		File Offset 0x014C727C
+		Ram Offset 0x014c727c
+		Virtual Method Slot: 65535
+
+	Method: set_blur:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C7284
+		Ram Offset 0x014c7284
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Single
+			Default Value: 
+	Method: get_blurFactor:
+		Accessibility: Public
+		Return Type: System.Single
+		File Offset 0x014C72A0
+		Ram Offset 0x014c72a0
+		Virtual Method Slot: 65535
+
+	Method: set_blurFactor:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C72A8
+		Ram Offset 0x014c72a8
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Single
+			Default Value: 
+	Method: get_toneMode:
+		Accessibility: Public
+		Return Type: Coffee.UIExtensions.EffectMode
+		File Offset 0x014C72C4
+		Ram Offset 0x014c72c4
+		Virtual Method Slot: 65535
+
+	Method: get_effectMode:
+		Accessibility: Public
+		Return Type: Coffee.UIExtensions.EffectMode
+		File Offset 0x014C72CC
+		Ram Offset 0x014c72cc
+		Virtual Method Slot: 65535
+
+	Method: get_colorMode:
+		Accessibility: Public
+		Return Type: Coffee.UIExtensions.ColorMode
+		File Offset 0x014C72D4
+		Ram Offset 0x014c72d4
+		Virtual Method Slot: 65535
+
+	Method: get_blurMode:
+		Accessibility: Public
+		Return Type: Coffee.UIExtensions.BlurMode
+		File Offset 0x014C72DC
+		Ram Offset 0x014c72dc
+		Virtual Method Slot: 65535
+
+	Method: get_effectColor:
+		Accessibility: Public
+		Return Type: UnityEngine.Color
+		File Offset 0x014C72E4
+		Ram Offset 0x014c72e4
+		Virtual Method Slot: 65535
+
+	Method: set_effectColor:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C72F8
+		Ram Offset 0x014c72f8
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: UnityEngine.Color
+			Default Value: 
+	Method: get_effectMaterial:
+		Accessibility: Public
+		Return Type: UnityEngine.Material
+		File Offset 0x014C730C
+		Ram Offset 0x014c730c
+		Virtual Method Slot: 61
+
+	Method: get_desamplingRate:
+		Accessibility: Public
+		Return Type: Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+		File Offset 0x014C7314
+		Ram Offset 0x014c7314
+		Virtual Method Slot: 65535
+
+	Method: set_desamplingRate:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C731C
+		Ram Offset 0x014c731c
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+			Default Value: 
+	Method: get_reductionRate:
+		Accessibility: Public
+		Return Type: Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+		File Offset 0x014C7324
+		Ram Offset 0x014c7324
+		Virtual Method Slot: 65535
+
+	Method: set_reductionRate:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C732C
+		Ram Offset 0x014c732c
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+			Default Value: 
+	Method: get_filterMode:
+		Accessibility: Public
+		Return Type: UnityEngine.FilterMode
+		File Offset 0x014C7334
+		Ram Offset 0x014c7334
+		Virtual Method Slot: 65535
+
+	Method: set_filterMode:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C733C
+		Ram Offset 0x014c733c
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: UnityEngine.FilterMode
+			Default Value: 
+	Method: get_capturedTexture:
+		Accessibility: Public
+		Return Type: UnityEngine.RenderTexture
+		File Offset 0x014C7344
+		Ram Offset 0x014c7344
+		Virtual Method Slot: 65535
+
+	Method: get_iterations:
+		Accessibility: Public
+		Return Type: System.Int32
+		File Offset 0x014C734C
+		Ram Offset 0x014c734c
+		Virtual Method Slot: 65535
+
+	Method: set_iterations:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C7354
+		Ram Offset 0x014c7354
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Int32
+			Default Value: 
+	Method: get_blurIterations:
+		Accessibility: Public
+		Return Type: System.Int32
+		File Offset 0x014C735C
+		Ram Offset 0x014c735c
+		Virtual Method Slot: 65535
+
+	Method: set_blurIterations:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C7364
+		Ram Offset 0x014c7364
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Int32
+			Default Value: 
+	Method: get_keepCanvasSize:
+		Accessibility: Public
+		Return Type: System.Boolean
+		File Offset 0x014C736C
+		Ram Offset 0x014c736c
+		Virtual Method Slot: 65535
+
+	Method: set_keepCanvasSize:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C7374
+		Ram Offset 0x014c7374
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Boolean
+			Default Value: 
+	Method: get_fitToScreen:
+		Accessibility: Public
+		Return Type: System.Boolean
+		File Offset 0x014C7380
+		Ram Offset 0x014c7380
+		Virtual Method Slot: 65535
+
+	Method: set_fitToScreen:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C7388
+		Ram Offset 0x014c7388
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Boolean
+			Default Value: 
+	Method: get_targetTexture:
+		Accessibility: Public
+		Return Type: UnityEngine.RenderTexture
+		File Offset 0x014C7394
+		Ram Offset 0x014c7394
+		Virtual Method Slot: 65535
+
+	Method: get_captureOnEnable:
+		Accessibility: Public
+		Return Type: System.Boolean
+		File Offset 0x014C739C
+		Ram Offset 0x014c739c
+		Virtual Method Slot: 65535
+
+	Method: set_captureOnEnable:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C73A4
+		Ram Offset 0x014c73a4
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Boolean
+			Default Value: 
+	Method: get_immediateCapturing:
+		Accessibility: Public
+		Return Type: System.Boolean
+		File Offset 0x014C73B0
+		Ram Offset 0x014c73b0
+		Virtual Method Slot: 65535
+
+	Method: set_immediateCapturing:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C73B8
+		Ram Offset 0x014c73b8
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: value
+			Type: System.Boolean
+			Default Value: 
+	Method: OnEnable:
+		Accessibility: Family
+		Return Type: System.Void
+		File Offset 0x014C73C4
+		Ram Offset 0x014c73c4
+		Virtual Method Slot: 5
+
+	Method: OnDisable:
+		Accessibility: Family
+		Return Type: System.Void
+		File Offset 0x014C73FC
+		Ram Offset 0x014c73fc
+		Virtual Method Slot: 7
+
+	Method: OnDestroy:
+		Accessibility: Family
+		Return Type: System.Void
+		File Offset 0x014C74FC
+		Ram Offset 0x014c74fc
+		Virtual Method Slot: 8
+
+	Method: OnPopulateMesh:
+		Accessibility: Family
+		Return Type: System.Void
+		File Offset 0x014C7550
+		Ram Offset 0x014c7550
+		Virtual Method Slot: 43
+
+		Parameter 0:
+			Name: vh
+			Type: UnityEngine.UI.VertexHelper
+			Default Value: 
+	Method: GetDesamplingSize:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C78A4
+		Ram Offset 0x014c78a4
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: rate
+			Type: Coffee.UIExtensions.UIEffectCapturedImage/DesamplingRate
+			Default Value: 
+		Parameter 1:
+			Name: w
+			Type: System.Int32
+			Default Value: 
+		Parameter 2:
+			Name: h
+			Type: System.Int32
+			Default Value: 
+	Method: Capture:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C4F80
+		Ram Offset 0x014c4f80
+		Virtual Method Slot: 65535
+
+	Method: SetupCommandBuffer:
+		Accessibility: Private
+		Return Type: System.Void
+		File Offset 0x014C7A78
+		Ram Offset 0x014c7a78
+		Virtual Method Slot: 65535
+
+	Method: Release:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C752C
+		Ram Offset 0x014c752c
+		Virtual Method Slot: 65535
+
+	Method: _Release:
+		Accessibility: Private
+		Return Type: System.Void
+		File Offset 0x014C7448
+		Ram Offset 0x014c7448
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: releaseRT
+			Type: System.Boolean
+			Default Value: 
+	Method: _Release:
+		Accessibility: Private
+		Return Type: System.Void
+		File Offset 0x014C79C8
+		Ram Offset 0x014c79c8
+		Virtual Method Slot: 65535
+
+		Parameter 0:
+			Name: obj
+			Type: UnityEngine.RenderTexture
+			Default Value: 
+	Method: _CoUpdateTextureOnNextFrame:
+		Accessibility: Private
+		Return Type: System.Collections.IEnumerator
+		File Offset 0x014C80EC
+		Ram Offset 0x014c80ec
+		Virtual Method Slot: 65535
+
+	Method: UpdateTexture:
+		Accessibility: Private
+		Return Type: System.Void
+		File Offset 0x014C8050
+		Ram Offset 0x014c8050
+		Virtual Method Slot: 65535
+
+	Method: .ctor:
+		Accessibility: Public
+		Return Type: System.Void
+		File Offset 0x014C8188
+		Ram Offset 0x014c8188
+		Virtual Method Slot: 65535

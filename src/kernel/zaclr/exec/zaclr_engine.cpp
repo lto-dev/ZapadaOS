@@ -122,24 +122,49 @@ namespace
 }
 
 extern "C" struct zaclr_result zaclr_engine_execute_launch(struct zaclr_engine* engine,
-                                                            struct zaclr_runtime* runtime,
-                                                            struct zaclr_launch_state* launch_state)
+                                                             struct zaclr_runtime* runtime,
+                                                             struct zaclr_launch_state* launch_state)
 {
     struct zaclr_frame* current_frame;
     struct zaclr_result result;
+
+    console_write("[ZACLR][engine] execute_launch enter\n");
 
     if (engine == NULL || runtime == NULL || launch_state == NULL || launch_state->assembly == NULL || launch_state->entry_method == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
+    console_write("[ZACLR][engine] launch assembly=");
+    console_write_hex64((uint64_t)(uintptr_t)launch_state->assembly);
+    console_write(" name_ptr=");
+    console_write_hex64((uint64_t)(uintptr_t)(launch_state->assembly != NULL ? launch_state->assembly->assembly_name.text : NULL));
+    console_write(" method_ptr=");
+    console_write_hex64((uint64_t)(uintptr_t)launch_state->entry_method);
+    console_write(" method_name_ptr=");
+    console_write_hex64((uint64_t)(uintptr_t)(launch_state->entry_method != NULL ? launch_state->entry_method->name.text : NULL));
+    console_write(" text=");
+    console_write(launch_state->assembly->assembly_name.text != NULL ? launch_state->assembly->assembly_name.text : "<null>");
+    console_write(" method=");
+    console_write(launch_state->entry_method->name.text != NULL ? launch_state->entry_method->name.text : "<null>");
+    console_write("\n");
+
     result = zaclr_frame_create_root(engine, runtime, launch_state, &current_frame);
     if (result.status != ZACLR_STATUS_OK)
     {
+        console_write("[ZACLR][engine] frame_create_root failed\n");
         return result;
     }
 
+    console_write("[ZACLR][engine] frame_create_root ok frame=");
+    console_write_dec((uint64_t)(current_frame != NULL ? current_frame->id : 0u));
+    console_write(" il_size=");
+    console_write_dec((uint64_t)(current_frame != NULL ? current_frame->il_size : 0u));
+    console_write("\n");
+
     runtime->state.flags |= ZACLR_RUNTIME_STATE_FLAG_BOOT_EXECUTED;
+
+    console_write("[ZACLR][engine] entering frame loop\n");
 
     return zaclr_engine_execute_frame_loop(engine, runtime, launch_state, current_frame, true);
 }
@@ -173,17 +198,17 @@ extern "C" struct zaclr_result zaclr_engine_execute_method(struct zaclr_engine* 
 }
 
 extern "C" struct zaclr_result zaclr_engine_execute_instance_method(struct zaclr_engine* engine,
-                                                                       struct zaclr_runtime* runtime,
-                                                                       struct zaclr_launch_state* launch_state,
-                                                                       const struct zaclr_loaded_assembly* assembly,
-                                                                       const struct zaclr_method_desc* method,
-                                                                       zaclr_object_handle instance_handle)
+                                                                        struct zaclr_runtime* runtime,
+                                                                        struct zaclr_launch_state* launch_state,
+                                                                        const struct zaclr_loaded_assembly* assembly,
+                                                                        const struct zaclr_method_desc* method,
+                                                                        struct zaclr_object_desc* instance)
 {
     static constexpr uint8_t k_has_this_calling_convention = 0x20u;
     struct zaclr_frame* current_frame;
     struct zaclr_result result;
 
-    if (engine == NULL || runtime == NULL || launch_state == NULL || assembly == NULL || method == NULL || instance_handle == 0u)
+    if (engine == NULL || runtime == NULL || launch_state == NULL || assembly == NULL || method == NULL || instance == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
@@ -210,7 +235,7 @@ extern "C" struct zaclr_result zaclr_engine_execute_instance_method(struct zaclr
         return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
-    current_frame->arguments[0].kind = ZACLR_STACK_VALUE_OBJECT_HANDLE;
-    current_frame->arguments[0].data.object_handle = instance_handle;
+    current_frame->arguments[0].kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+    current_frame->arguments[0].data.object_reference = instance;
     return zaclr_engine_execute_frame_loop(engine, runtime, launch_state, current_frame, false);
 }

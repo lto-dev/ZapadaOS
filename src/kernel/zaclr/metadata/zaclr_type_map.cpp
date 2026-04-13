@@ -132,6 +132,12 @@ extern "C" struct zaclr_result zaclr_type_map_initialize(struct zaclr_type_map* 
         types[type_index].first_method_index = row.method_list > 0u ? (row.method_list - 1u) : 0u;
         types[type_index].method_count = next_method_list > row.method_list ? (next_method_list - row.method_list) : 0u;
         types[type_index].flags = row.flags;
+        if (type_namespace.text != NULL
+            && type_name.text != NULL
+            && text_equals(type_namespace.text, "System")
+            && text_equals(type_name.text, "String")) {
+            types[type_index].runtime_flags |= ZACLR_TYPE_RUNTIME_FLAG_HAS_COMPONENT_SIZE;
+        }
     }
 
     for (type_index = 0u; type_index < type_count; ++type_index) {

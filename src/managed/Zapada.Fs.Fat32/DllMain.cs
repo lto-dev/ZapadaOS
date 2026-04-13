@@ -24,7 +24,7 @@ using Zapada.Storage;
 
 namespace Zapada.Fs.Fat32
 {
-    internal static class DllMain
+    public static class DllMain
     {
         /*
          * Initialize() - called by BootLoader.cs once FAT32.DLL is loaded.
@@ -32,7 +32,7 @@ namespace Zapada.Fs.Fat32
          * Registers the FAT32 probe and emits gate output.
          * Returns 1 on success, 0 on failure.
          */
-        internal static int Initialize()
+        public static int Initialize()
         {
             Console.Write("[Boot] FAT32 driver initialized\n");
 

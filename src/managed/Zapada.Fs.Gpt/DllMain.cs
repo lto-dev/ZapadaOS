@@ -23,14 +23,14 @@ using System;
 
 namespace Zapada.Fs
 {
-    internal static class DllMain
+    public static class DllMain
     {
         /*
          * Initialize() - called by BootLoader.cs once GPT.DLL is loaded.
          *
          * Returns 1 on success, 0 on failure.
          */
-        internal static int Initialize()
+        public static int Initialize()
         {
             Console.Write("[Boot] GPT driver initialized\n");
             Console.Write("[Gate] Phase31-D2\n");

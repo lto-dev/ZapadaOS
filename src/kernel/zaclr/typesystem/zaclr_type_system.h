@@ -2,6 +2,7 @@
 #define ZACLR_TYPE_SYSTEM_H
 
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
+#include <kernel/zaclr/typesystem/zaclr_generic_context.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,6 +19,15 @@ struct zaclr_memberref_target {
     const char* assembly_name;
     struct zaclr_signature_desc signature;
     uint32_t class_token;
+};
+
+struct zaclr_typespec_desc {
+    uint8_t element_type;
+    uint8_t is_generic_instantiation;
+    uint16_t reserved0;
+    struct zaclr_token generic_type_token;
+    const struct zaclr_loaded_assembly* generic_type_assembly;
+    struct zaclr_generic_context generic_context;
 };
 
 bool zaclr_text_equals(const char* left, const char* right);
@@ -50,6 +60,11 @@ struct zaclr_result zaclr_type_system_resolve_external_named_type(struct zaclr_r
                                                                   const struct zaclr_member_name_ref* name,
                                                                   const struct zaclr_loaded_assembly** out_assembly,
                                                                   const struct zaclr_type_desc** out_type);
+struct zaclr_result zaclr_type_system_parse_typespec(const struct zaclr_loaded_assembly* current_assembly,
+                                                     struct zaclr_runtime* runtime,
+                                                     struct zaclr_token token,
+                                                     struct zaclr_typespec_desc* out_desc);
+void zaclr_type_system_reset_typespec_desc(struct zaclr_typespec_desc* desc);
 
 #ifdef __cplusplus
 }

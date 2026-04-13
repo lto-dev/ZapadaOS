@@ -2,23 +2,44 @@
 
 #include <kernel/support/kernel_memory.h>
 #include <kernel/zaclr/diag/zaclr_trace_events.h>
+#include <kernel/zaclr/exec/zaclr_call_resolution.h>
+#include <kernel/zaclr/exec/zaclr_dispatch_helpers.h>
+#include <kernel/zaclr/metadata/zaclr_metadata_reader.h>
 #include <kernel/zaclr/exec/zaclr_emulated_float.h>
+#include <kernel/zaclr/exec/zaclr_interop_dispatch.h>
+#include <kernel/zaclr/exec/zaclr_intrinsics.h>
+#include <kernel/zaclr/exec/zaclr_type_init.h>
 #include <kernel/zaclr/heap/zaclr_array.h>
+#include <kernel/zaclr/heap/zaclr_object.h>
 #include <kernel/zaclr/heap/zaclr_string.h>
 #include <kernel/zaclr/interop/zaclr_internal_call_registry.h>
 #include <kernel/zaclr/interop/zaclr_marshalling.h>
 #include <kernel/zaclr/interop/zaclr_native_assembly.h>
+#include <kernel/zaclr/interop/zaclr_pinvoke_resolver.h>
+#include <kernel/zaclr/interop/zaclr_qcall_table.h>
 #include <kernel/zaclr/loader/zaclr_binder.h>
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
+#include <kernel/zaclr/typesystem/zaclr_call_target.h>
+#include <kernel/zaclr/typesystem/zaclr_delegate_runtime.h>
+#include <kernel/zaclr/typesystem/zaclr_method_handle.h>
+#include <kernel/zaclr/typesystem/zaclr_method_table.h>
+#include <kernel/zaclr/typesystem/zaclr_type_prepare.h>
 #include <kernel/zaclr/typesystem/zaclr_member_resolution.h>
 #include <kernel/zaclr/typesystem/zaclr_type_system.h>
 
 extern "C" {
+#include <kernel/console.h>
 #include <kernel/support/kernel_memory.h>
 }
 
 namespace
 {
+    static constexpr uint32_t k_zaclr_frame_flag_newobj_ctor = 0x00000001u;
+    static constexpr uint16_t k_method_attribute_static = 0x0010u;
+    static constexpr uint16_t METHOD_FLAG_VIRTUAL = 0x0040u;
+    static constexpr uint8_t k_type_initializer_state_running = 1u;
+    static constexpr uint8_t k_type_initializer_state_complete = 2u;
+
     constexpr uint16_t k_method_impl_flag_internal_call = 0x1000u;
 
     constexpr int32_t k_int32_max = (int32_t)0x7FFFFFFF;
@@ -64,6 +85,40 @@ namespace
                                                  struct zaclr_token token,
                                                  const struct zaclr_loaded_assembly** out_assembly,
                                                  const struct zaclr_type_desc** out_type);
+
+    static const struct zaclr_type_desc* find_field_owner_type(const struct zaclr_loaded_assembly* assembly,
+                                                               uint32_t field_row)
+    {
+        uint32_t type_index;
+
+        if (assembly == NULL || assembly->type_map.types == NULL || field_row == 0u)
+        {
+            return NULL;
+        }
+
+        for (type_index = 0u; type_index < assembly->type_map.count; ++type_index)
+        {
+            const struct zaclr_type_desc* type = &assembly->type_map.types[type_index];
+            if (field_row >= type->field_list && field_row < (type->field_list + type->field_count))
+            {
+                return type;
+            }
+        }
+
+        return NULL;
+    }
+
+    static struct zaclr_result ensure_type_initializer_ran(struct zaclr_runtime* runtime,
+                                                           const struct zaclr_loaded_assembly* assembly,
+                                                           const struct zaclr_type_desc* type)
+    {
+        return zaclr_ensure_type_initializer_ran(runtime, assembly, type);
+    }
+
+    static bool method_is_type_initializer_trigger(const struct zaclr_method_desc* method)
+    {
+        return zaclr_method_is_type_initializer_trigger(method);
+    }
 
     static uint64_t read_u64(const uint8_t* data)
     {
@@ -178,18 +233,9 @@ namespace
             text[char_index] = (uint16_t)read_u16(reader->user_string_heap.data + offset + (char_index * 2u));
         }
 
-        result = zaclr_string_allocate_utf16(heap, text, char_length, out_handle);
+        result = zaclr_string_allocate_utf16_handle(heap, text, char_length, out_handle);
         kernel_free(text);
         return result;
-    }
-
-    static struct zaclr_result resolve_exported_type_forwarder(const struct zaclr_loaded_assembly* assembly,
-                                                               struct zaclr_runtime* runtime,
-                                                               const struct zaclr_member_name_ref* name,
-                                                               const struct zaclr_loaded_assembly** out_assembly,
-                                                               const struct zaclr_type_desc** out_type)
-    {
-        return zaclr_type_system_resolve_exported_type_forwarder(assembly, runtime, name, out_assembly, out_type);
     }
 
     static struct zaclr_result metadata_get_type_name(const struct zaclr_loaded_assembly* assembly,
@@ -369,6 +415,14 @@ namespace
                 return result;
             }
 
+            result = ensure_type_initializer_ran(frame->runtime,
+                                                 target_assembly,
+                                                 find_field_owner_type(target_assembly, target_field_row));
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
             if (target_field_row == 0u || target_field_row > target_assembly->static_field_count || target_assembly->static_fields == NULL)
             {
                 return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
@@ -389,6 +443,15 @@ namespace
         }
 
         field_row = zaclr_token_row(&token);
+        {
+            struct zaclr_result init_result = ensure_type_initializer_ran(frame->runtime,
+                                                                          frame->assembly,
+                                                                          find_field_owner_type(frame->assembly, field_row));
+            if (init_result.status != ZACLR_STATUS_OK)
+            {
+                return init_result;
+            }
+        }
         if (field_row == 0u || field_row > frame->assembly->static_field_count || frame->assembly->static_fields == NULL)
         {
             return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
@@ -405,34 +468,124 @@ namespace
 
     static struct zaclr_result store_local(struct zaclr_frame* frame, uint32_t local_index)
     {
+        struct zaclr_stack_value value = {};
+
         if (frame == NULL || local_index >= frame->local_count)
         {
             return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        return zaclr_eval_stack_pop(&frame->eval_stack, &frame->locals[local_index]);
+        {
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+        }
+
+        frame->locals[local_index] = value;
+
+        return zaclr_result_ok();
     }
 
     static struct zaclr_result store_argument(struct zaclr_frame* frame, uint32_t argument_index)
     {
+        struct zaclr_stack_value value = {};
+
         if (frame == NULL || argument_index >= frame->argument_count)
         {
             return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        return zaclr_eval_stack_pop(&frame->eval_stack, &frame->arguments[argument_index]);
+        {
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+        }
+
+        if (frame->arguments[argument_index].kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+        {
+            struct zaclr_stack_value* target = (struct zaclr_stack_value*)(uintptr_t)frame->arguments[argument_index].data.raw;
+            if (target == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            ZACLR_TRACE_VALUE(frame->runtime,
+                              ZACLR_TRACE_CATEGORY_EXEC,
+                              ZACLR_TRACE_EVENT_CALL_TARGET,
+                              "StoreArgument.ByRefWriteKind",
+                              (uint64_t)value.kind);
+            *target = value;
+            return zaclr_result_ok();
+        }
+
+        frame->arguments[argument_index] = value;
+        return zaclr_result_ok();
     }
 
     static struct zaclr_result store_static_field(struct zaclr_frame* frame, struct zaclr_token token)
     {
         uint32_t field_row;
+        struct zaclr_result result;
+        struct zaclr_memberref_target memberref = {};
+        const struct zaclr_loaded_assembly* target_assembly = NULL;
+        uint32_t target_field_row = 0u;
 
-        if (frame == NULL || frame->assembly == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
+        if (frame == NULL || frame->assembly == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_MEMBERREF))
+        {
+            result = zaclr_metadata_get_memberref_info(frame->assembly, token, &memberref);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = zaclr_member_resolution_resolve_field(frame->runtime,
+                                                           &memberref,
+                                                           &target_assembly,
+                                                           &target_field_row);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = ensure_type_initializer_ran(frame->runtime,
+                                                 target_assembly,
+                                                 find_field_owner_type(target_assembly, target_field_row));
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            if (target_field_row == 0u || target_field_row > target_assembly->static_field_count || target_assembly->static_fields == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            return zaclr_eval_stack_pop(&frame->eval_stack, &target_assembly->static_fields[target_field_row - 1u]);
+        }
+
+        if (!zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
         {
             return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
         field_row = zaclr_token_row(&token);
+        result = ensure_type_initializer_ran(frame->runtime,
+                                             frame->assembly,
+                                             find_field_owner_type(frame->assembly, field_row));
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
         if (field_row == 0u || field_row > frame->assembly->static_field_count || frame->assembly->static_fields == NULL)
         {
             return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
@@ -442,26 +595,66 @@ namespace
     }
 
     static struct zaclr_result store_object_field(struct zaclr_runtime* runtime,
-                                                  zaclr_object_handle handle,
+                                                  struct zaclr_object_desc* object,
                                                   struct zaclr_token token,
                                                   const struct zaclr_stack_value* value)
     {
-        return zaclr_object_store_field(runtime, handle, token, value);
+        return zaclr_object_store_field(runtime, object, token, value);
     }
 
     static struct zaclr_result push_object_handle(struct zaclr_frame* frame, zaclr_object_handle value)
     {
         struct zaclr_stack_value stack_value = {};
-        stack_value.kind = ZACLR_STACK_VALUE_OBJECT_HANDLE;
-        stack_value.data.object_handle = value;
+        stack_value.kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+        stack_value.data.object_reference = frame != NULL && frame->runtime != NULL
+            ? zaclr_heap_get_object(&frame->runtime->heap, value)
+            : NULL;
         return zaclr_eval_stack_push(&frame->eval_stack, &stack_value);
     }
 
     static struct zaclr_result push_local_address(struct zaclr_frame* frame, uint32_t local_index)
     {
         struct zaclr_stack_value stack_value = {};
-        stack_value.kind = ZACLR_STACK_VALUE_LOCAL_ADDRESS;
-        stack_value.data.raw = local_index;
+        struct zaclr_result result;
+
+        if (frame == NULL || local_index >= frame->local_count)
+        {
+            return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        result = zaclr_stack_value_set_byref(&stack_value,
+                                             &frame->locals[local_index],
+                                             sizeof(struct zaclr_stack_value),
+                                             0u,
+                                             ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        return zaclr_eval_stack_push(&frame->eval_stack, &stack_value);
+    }
+
+    static struct zaclr_result push_argument_address(struct zaclr_frame* frame, uint32_t argument_index)
+    {
+        struct zaclr_stack_value stack_value = {};
+        struct zaclr_result result;
+
+        if (frame == NULL || argument_index >= frame->argument_count)
+        {
+            return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        result = zaclr_stack_value_set_byref(&stack_value,
+                                             &frame->arguments[argument_index],
+                                             sizeof(struct zaclr_stack_value),
+                                             0u,
+                                             ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
         return zaclr_eval_stack_push(&frame->eval_stack, &stack_value);
     }
 
@@ -470,7 +663,19 @@ namespace
     {
         uint32_t local_index;
 
-        if (frame == NULL || value == NULL || value->kind != ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+        if (frame == NULL || value == NULL)
+        {
+            return NULL;
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_BYREF)
+        {
+            return (value->flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) != 0u
+                ? (struct zaclr_stack_value*)(uintptr_t)value->data.raw
+                : NULL;
+        }
+
+        if (value->kind != ZACLR_STACK_VALUE_LOCAL_ADDRESS)
         {
             return NULL;
         }
@@ -484,6 +689,79 @@ namespace
         return (struct zaclr_stack_value*)(uintptr_t)value->data.raw;
     }
 
+    struct zaclr_resolved_byref {
+        struct zaclr_stack_value* stack_slot;
+        uint8_t* address;
+        uint32_t payload_size;
+        uint32_t type_token_raw;
+    };
+
+    static bool stack_value_kind_is_scalar(uint32_t kind)
+    {
+        return kind == ZACLR_STACK_VALUE_I4
+            || kind == ZACLR_STACK_VALUE_I8
+            || kind == ZACLR_STACK_VALUE_R4
+            || kind == ZACLR_STACK_VALUE_R8
+            || kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+    }
+
+    static struct zaclr_result resolve_byref_target(struct zaclr_frame* frame,
+                                                    struct zaclr_stack_value* value,
+                                                    struct zaclr_resolved_byref* out_target)
+    {
+        if (value == NULL || out_target == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        *out_target = {};
+        if (value->kind == ZACLR_STACK_VALUE_BYREF)
+        {
+            out_target->payload_size = value->payload_size;
+            out_target->type_token_raw = value->type_token_raw;
+            if ((value->flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) != 0u)
+            {
+                out_target->stack_slot = (struct zaclr_stack_value*)(uintptr_t)value->data.raw;
+                return out_target->stack_slot != NULL
+                    ? zaclr_result_ok()
+                    : zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            out_target->address = (uint8_t*)(uintptr_t)value->data.raw;
+            return out_target->address != NULL
+                ? zaclr_result_ok()
+                : zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+        {
+            out_target->stack_slot = resolve_local_address_target(frame, value);
+            out_target->payload_size = sizeof(struct zaclr_stack_value);
+            return out_target->stack_slot != NULL
+                ? zaclr_result_ok()
+                : zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        /* Native int / pointer used as a managed pointer (from Unsafe.AsPointer etc.) */
+        if (value->kind == ZACLR_STACK_VALUE_I8 && value->data.i8 != 0)
+        {
+            out_target->address = (uint8_t*)(uintptr_t)value->data.i8;
+            out_target->payload_size = value->payload_size != 0u ? value->payload_size : 8u;
+            out_target->type_token_raw = value->type_token_raw;
+            return zaclr_result_ok();
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I4 && value->data.i4 != 0)
+        {
+            out_target->address = (uint8_t*)(uintptr_t)(uint32_t)value->data.i4;
+            out_target->payload_size = value->payload_size != 0u ? value->payload_size : 4u;
+            out_target->type_token_raw = value->type_token_raw;
+            return zaclr_result_ok();
+        }
+
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
     static struct zaclr_result box_stack_value(struct zaclr_runtime* runtime,
                                                const struct zaclr_stack_value* value,
                                                struct zaclr_token token,
@@ -494,7 +772,134 @@ namespace
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        return zaclr_boxed_value_allocate(&runtime->heap, token, value, out_handle);
+        return zaclr_boxed_value_allocate_handle(&runtime->heap, token, value, out_handle);
+    }
+
+    static const struct zaclr_field_layout* find_instance_field_layout_in_method_table(const struct zaclr_method_table* method_table,
+                                                                                       struct zaclr_token token)
+    {
+        uint32_t index;
+
+        if (method_table == NULL || method_table->instance_fields == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
+        {
+            return NULL;
+        }
+
+        for (index = 0u; index < method_table->instance_field_count; ++index)
+        {
+            const struct zaclr_field_layout* layout = &method_table->instance_fields[index];
+            if (layout->is_static == 0u && layout->field_token_row == zaclr_token_row(&token))
+            {
+                return layout;
+            }
+        }
+
+        return NULL;
+    }
+
+    static struct zaclr_result load_field_from_resolved_byref_payload(struct zaclr_frame* frame,
+                                                                      const struct zaclr_resolved_byref* target,
+                                                                      struct zaclr_token field_token,
+                                                                      struct zaclr_stack_value* out_value)
+    {
+        const struct zaclr_loaded_assembly* type_assembly = NULL;
+        const struct zaclr_type_desc* type_desc = NULL;
+        struct zaclr_method_table* method_table = NULL;
+        const struct zaclr_field_layout* layout;
+        const uint8_t* field_address;
+
+        if (frame == NULL || target == NULL || out_value == NULL || target->address == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        {
+            struct zaclr_token value_type_token = zaclr_token_make(target->type_token_raw);
+            if (!zaclr_token_matches_table(&field_token, ZACLR_TOKEN_TABLE_FIELD))
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            if (zaclr_token_matches_table(&value_type_token, ZACLR_TOKEN_TABLE_TYPEDEF)
+                || zaclr_token_matches_table(&value_type_token, ZACLR_TOKEN_TABLE_TYPEREF)
+                || zaclr_token_matches_table(&value_type_token, ZACLR_TOKEN_TABLE_TYPESPEC))
+            {
+                struct zaclr_result result = zaclr_type_system_resolve_type_desc(frame->assembly,
+                                                                                 frame->runtime,
+                                                                                 value_type_token,
+                                                                                 &type_assembly,
+                                                                                 &type_desc);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+            }
+            else
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+        }
+        if (type_desc == NULL || type_assembly == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        {
+            struct zaclr_result result = zaclr_type_prepare(frame->runtime,
+                                                           (struct zaclr_loaded_assembly*)type_assembly,
+                                                           type_desc,
+                                                           &method_table);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+        }
+
+        layout = find_instance_field_layout_in_method_table(method_table, field_token);
+        if (layout == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        field_address = target->address + layout->byte_offset;
+        *out_value = {};
+
+        if (layout->element_type == ZACLR_ELEMENT_TYPE_VALUETYPE)
+        {
+            return zaclr_stack_value_set_valuetype(out_value,
+                                                   layout->nested_type_token_raw,
+                                                   field_address,
+                                                   layout->field_size);
+        }
+
+        if (layout->is_reference != 0u)
+        {
+            struct zaclr_object_desc* reference = NULL;
+            kernel_memcpy(&reference, field_address, sizeof(reference));
+            out_value->kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+            out_value->data.object_reference = reference;
+            return zaclr_result_ok();
+        }
+
+        if (layout->field_size <= 4u)
+        {
+            uint32_t raw = 0u;
+            kernel_memcpy(&raw, field_address, layout->field_size);
+            out_value->kind = ZACLR_STACK_VALUE_I4;
+            out_value->data.i4 = (int32_t)raw;
+            return zaclr_result_ok();
+        }
+
+        if (layout->field_size == 8u)
+        {
+            uint64_t raw = 0u;
+            kernel_memcpy(&raw, field_address, sizeof(raw));
+            out_value->kind = ZACLR_STACK_VALUE_I8;
+            out_value->data.i8 = (int64_t)raw;
+            return zaclr_result_ok();
+        }
+
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
     static struct zaclr_result allocate_reference_type_instance(struct zaclr_runtime* runtime,
@@ -502,101 +907,23 @@ namespace
                                                                 struct zaclr_token type_token,
                                                                 zaclr_object_handle* out_handle)
     {
-        zaclr_type_id type_id;
-        uint32_t field_capacity = 0u;
-        const struct zaclr_type_desc* type_desc = NULL;
+        struct zaclr_object_desc* object = NULL;
+        struct zaclr_result result;
 
-        auto accumulate_instance_field_capacity = [&](const struct zaclr_loaded_assembly* current_assembly,
-                                                      const struct zaclr_type_desc* current_type,
-                                                      uint32_t* io_capacity,
-                                                      auto&& self) -> struct zaclr_result
-        {
-            const struct zaclr_loaded_assembly* base_assembly;
-            const struct zaclr_type_desc* base_type;
-            struct zaclr_result result;
-
-            if (current_assembly == NULL || current_type == NULL || io_capacity == NULL)
-            {
-                return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
-            }
-
-            *io_capacity += current_type->field_count;
-            if (zaclr_token_is_nil(&current_type->extends))
-            {
-                return zaclr_result_ok();
-            }
-
-            result = resolve_type_desc(current_assembly,
-                                       runtime,
-                                       current_type->extends,
-                                       &base_assembly,
-                                       &base_type);
-            if (result.status != ZACLR_STATUS_OK || base_type == NULL)
-            {
-                return result.status == ZACLR_STATUS_OK
-                    ? zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC)
-                    : result;
-            }
-
-            return self(base_assembly, base_type, io_capacity, self);
-        };
-
-        if (runtime == NULL || out_handle == NULL || owning_assembly == NULL)
+        if (out_handle == NULL)
         {
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
         *out_handle = 0u;
-        if (zaclr_token_matches_table(&type_token, ZACLR_TOKEN_TABLE_TYPEDEF))
+        result = zaclr_allocate_reference_type_instance(runtime, owning_assembly, type_token, &object);
+        if (result.status != ZACLR_STATUS_OK)
         {
-            type_id = zaclr_token_row(&type_token);
-            type_desc = zaclr_type_map_find_by_token(&owning_assembly->type_map, type_token);
-            if (type_desc == NULL)
-            {
-                return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
-            }
-
-            {
-                struct zaclr_result result = accumulate_instance_field_capacity(owning_assembly,
-                                                                                type_desc,
-                                                                                &field_capacity,
-                                                                                accumulate_instance_field_capacity);
-                if (result.status != ZACLR_STATUS_OK)
-                {
-                    return result;
-                }
-
-            }
-        }
-        else if (token_is_heap_reference(type_token))
-        {
-            type_id = 0u;
-        }
-        else
-        {
-            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            return result;
         }
 
-        {
-            struct zaclr_result result = zaclr_reference_object_allocate(&runtime->heap, owning_assembly, type_id, type_token, field_capacity, out_handle);
-            struct zaclr_object_desc* object;
-            if (result.status != ZACLR_STATUS_OK)
-            {
-                return result;
-            }
-
-            if (type_desc != NULL
-                && (zaclr_type_runtime_flags(type_desc) & ZACLR_TYPE_RUNTIME_FLAG_HAS_FINALIZER) != 0u)
-            {
-                object = zaclr_heap_get_object(&runtime->heap, *out_handle);
-                if (object != NULL)
-                {
-                    object->gc_state = (uint8_t)(object->gc_state | ZACLR_OBJECT_GC_STATE_FINALIZER_PENDING);
-                }
-            }
-
-            return zaclr_result_ok();
-        }
+        *out_handle = runtime != NULL ? zaclr_heap_get_object_handle(&runtime->heap, object) : 0u;
+        return zaclr_result_ok();
     }
 
     static bool token_is_named_type(const struct zaclr_loaded_assembly* assembly,
@@ -627,59 +954,7 @@ namespace
                                                  const struct zaclr_loaded_assembly** out_assembly,
                                                  const struct zaclr_type_desc** out_type)
     {
-        if (current_assembly == NULL || runtime == NULL || out_assembly == NULL || out_type == NULL)
-        {
-            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
-        }
-
-        *out_assembly = NULL;
-        *out_type = NULL;
-
-        if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_TYPEDEF))
-        {
-            *out_assembly = current_assembly;
-            *out_type = zaclr_type_map_find_by_token(&current_assembly->type_map, token);
-            return *out_type != NULL
-                ? zaclr_result_ok()
-                : zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
-        }
-
-        if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_TYPEREF))
-        {
-            struct zaclr_member_name_ref name = {};
-            const char* assembly_name = NULL;
-            struct zaclr_result result = zaclr_metadata_get_typeref_name(&current_assembly->metadata, zaclr_token_row(&token), &name);
-            if (result.status != ZACLR_STATUS_OK)
-            {
-                return result;
-            }
-
-            result = zaclr_metadata_get_typeref_assembly_name(&current_assembly->metadata, zaclr_token_row(&token), &assembly_name);
-            if (result.status != ZACLR_STATUS_OK || assembly_name == NULL)
-            {
-                return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
-            }
-
-            result = zaclr_binder_load_assembly_by_name(runtime, assembly_name, out_assembly);
-            if (result.status != ZACLR_STATUS_OK)
-            {
-                return result;
-            }
-
-            *out_type = zaclr_type_system_find_type_by_name(*out_assembly, &name);
-            if (*out_type != NULL)
-            {
-                return zaclr_result_ok();
-            }
-
-            return resolve_exported_type_forwarder(*out_assembly,
-                                                   runtime,
-                                                   &name,
-                                                   out_assembly,
-                                                   out_type);
-        }
-
-        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+        return zaclr_dispatch_resolve_type_desc(current_assembly, runtime, token, out_assembly, out_type);
     }
 
     static bool append_shape_text(char* buffer, size_t capacity, size_t* length, const char* text)
@@ -907,11 +1182,11 @@ namespace
     }
 
     static struct zaclr_result load_object_field(struct zaclr_runtime* runtime,
-                                                 zaclr_object_handle handle,
+                                                 const struct zaclr_object_desc* object,
                                                  struct zaclr_token token,
                                                  struct zaclr_stack_value* out_value)
     {
-        return zaclr_object_load_field(runtime, handle, token, out_value);
+        return zaclr_object_load_field(runtime, object, token, out_value);
     }
 
     static struct zaclr_result bind_newobj_arguments(struct zaclr_frame* child,
@@ -937,8 +1212,10 @@ namespace
                 return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
             }
 
-            child->arguments[0].kind = ZACLR_STACK_VALUE_OBJECT_HANDLE;
-            child->arguments[0].data.object_handle = instance_handle;
+            child->arguments[0].kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+            child->arguments[0].data.object_reference = child->runtime != NULL
+                ? zaclr_heap_get_object(&child->runtime->heap, instance_handle)
+                : NULL;
             for (argument_index = child->argument_count; argument_index > 1u; --argument_index)
             {
                 struct zaclr_result result = zaclr_eval_stack_pop(caller_stack, &child->arguments[argument_index - 1u]);
@@ -956,11 +1233,17 @@ namespace
 
     static bool is_system_object_ctor(const struct zaclr_memberref_target* memberref)
     {
-        return memberref != NULL
-            && text_equals(memberref->key.type_namespace, "System")
-            && text_equals(memberref->key.type_name, "Object")
-            && text_equals(memberref->key.method_name, ".ctor");
+        return zaclr_dispatch_is_system_object_ctor(memberref);
     }
+
+    static struct zaclr_result try_invoke_intrinsic(struct zaclr_frame* frame,
+                                                    const struct zaclr_loaded_assembly* assembly,
+                                                    const struct zaclr_type_desc* type,
+                                                    const struct zaclr_method_desc* method)
+    {
+        return zaclr_try_invoke_intrinsic(frame, assembly, type, method);
+    }
+
 
     static struct zaclr_result unbox_any_value(struct zaclr_runtime* runtime,
                                                zaclr_object_handle handle,
@@ -1043,6 +1326,7 @@ namespace
     {
         struct zaclr_stack_value* target;
         uint64_t encoded_handle = 0u;
+        uintptr_t raw_handle = 0u;
         uint32_t handle_index;
         struct zaclr_gc_handle_entry entry = {};
         struct zaclr_result result;
@@ -1061,28 +1345,30 @@ namespace
                 return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
             }
 
-            if (target->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+            if (target->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
             {
                 return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
             }
 
-            *out_handle = target->data.object_handle;
+            *out_handle = zaclr_heap_get_object_handle(&runtime->heap, target->data.object_reference);
             return zaclr_result_ok();
         }
 
-        if (address_value->kind == ZACLR_STACK_VALUE_OBJECT_HANDLE)
+        if (address_value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
         {
-            *out_handle = address_value->data.object_handle;
+            *out_handle = zaclr_heap_get_object_handle(&runtime->heap, address_value->data.object_reference);
             return zaclr_result_ok();
         }
 
         if (address_value->kind == ZACLR_STACK_VALUE_I8)
         {
             encoded_handle = (uint64_t)address_value->data.i8;
+            raw_handle = (uintptr_t)address_value->data.i8;
         }
         else if (address_value->kind == ZACLR_STACK_VALUE_I4)
         {
             encoded_handle = (uint32_t)address_value->data.i4;
+            raw_handle = (uintptr_t)(uint32_t)address_value->data.i4;
         }
         else
         {
@@ -1095,7 +1381,23 @@ namespace
             return zaclr_result_ok();
         }
 
-        if (!decode_encoded_gc_handle_value(encoded_handle, &handle_index))
+        if (runtime->boot_launch.handle_table.entries != NULL)
+        {
+            uintptr_t base = (uintptr_t)&runtime->boot_launch.handle_table.entries[0].handle;
+            uintptr_t end = (uintptr_t)&runtime->boot_launch.handle_table.entries[runtime->boot_launch.handle_table.capacity].handle;
+
+            if (raw_handle >= base
+                && raw_handle < end
+                && ((raw_handle - base) % sizeof(struct zaclr_gc_handle_entry)) == 0u)
+            {
+                handle_index = (uint32_t)((raw_handle - base) / sizeof(struct zaclr_gc_handle_entry));
+            }
+            else if (!decode_encoded_gc_handle_value(encoded_handle, &handle_index))
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+        }
+        else if (!decode_encoded_gc_handle_value(encoded_handle, &handle_index))
         {
             return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
         }
@@ -1269,10 +1571,22 @@ namespace
             return result;
         }
 
-        if (left.kind == ZACLR_STACK_VALUE_OBJECT_HANDLE && right.kind == ZACLR_STACK_VALUE_OBJECT_HANDLE)
+        if (left.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE && right.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
         {
-            *out_left = (int32_t)left.data.object_handle;
-            *out_right = (int32_t)right.data.object_handle;
+            zaclr_object_handle left_handle = zaclr_heap_get_object_handle(&frame->runtime->heap, left.data.object_reference);
+            zaclr_object_handle right_handle = zaclr_heap_get_object_handle(&frame->runtime->heap, right.data.object_reference);
+            ZACLR_TRACE_VALUE(frame->runtime,
+                              ZACLR_TRACE_CATEGORY_EXEC,
+                              ZACLR_TRACE_EVENT_CALL_TARGET,
+                              "BranchCompare.Object.Left",
+                              (uint64_t)left_handle);
+            ZACLR_TRACE_VALUE(frame->runtime,
+                              ZACLR_TRACE_CATEGORY_EXEC,
+                              ZACLR_TRACE_EVENT_CALL_TARGET,
+                              "BranchCompare.Object.Right",
+                              (uint64_t)right_handle);
+            *out_left = (int32_t)left_handle;
+            *out_right = (int32_t)right_handle;
             return zaclr_result_ok();
         }
 
@@ -1360,20 +1674,43 @@ namespace
         return (uint32_t)((int32_t)il_offset + 5 + delta);
     }
 
-    static struct zaclr_result stack_value_to_object_handle(const struct zaclr_stack_value* value,
-                                                            zaclr_object_handle* out_value)
+    static struct zaclr_result stack_value_to_object_reference(struct zaclr_runtime*,
+                                                               const struct zaclr_stack_value* value,
+                                                               struct zaclr_object_desc** out_value)
     {
         if (value == NULL || out_value == NULL)
         {
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        if (value->kind != ZACLR_STACK_VALUE_OBJECT_HANDLE)
+        if (value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
         {
             return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        *out_value = value->data.object_handle;
+        *out_value = value->data.object_reference;
+        return zaclr_result_ok();
+    }
+
+    static struct zaclr_result stack_value_to_object_handle(struct zaclr_runtime* runtime,
+                                                            const struct zaclr_stack_value* value,
+                                                            zaclr_object_handle* out_value)
+    {
+        struct zaclr_object_desc* object = NULL;
+        struct zaclr_result result;
+
+        if (runtime == NULL || out_value == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        result = stack_value_to_object_reference(runtime, value, &object);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        *out_value = zaclr_heap_get_object_handle(&runtime->heap, object);
         return zaclr_result_ok();
     }
 
@@ -1450,10 +1787,10 @@ namespace
                 return result;
             }
 
-            *out_handle = exception_object->handle;
+            *out_handle = zaclr_heap_get_object_handle(&runtime->heap, exception_object);
+            runtime->boot_launch.thread.current_exception = exception_object;
         }
 
-        runtime->boot_launch.thread.current_exception = *out_handle;
         return zaclr_result_ok();
     }
 
@@ -1760,6 +2097,44 @@ namespace
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
+        if (left->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE || right->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+        {
+            zaclr_object_handle left_handle = left->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE
+                ? zaclr_heap_get_object_handle(&frame->runtime->heap, left->data.object_reference)
+                : 0u;
+            zaclr_object_handle right_handle = right->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE
+                ? zaclr_heap_get_object_handle(&frame->runtime->heap, right->data.object_reference)
+                : 0u;
+
+            ZACLR_TRACE_VALUE(frame->runtime,
+                              ZACLR_TRACE_CATEGORY_EXEC,
+                              ZACLR_TRACE_EVENT_CALL_TARGET,
+                              "Compare.Object.Left",
+                              (uint64_t)left_handle);
+            ZACLR_TRACE_VALUE(frame->runtime,
+                              ZACLR_TRACE_CATEGORY_EXEC,
+                              ZACLR_TRACE_EVENT_CALL_TARGET,
+                              "Compare.Object.Right",
+                              (uint64_t)right_handle);
+
+            switch (opcode)
+            {
+                case CEE_CEQ:
+                    result_value = (left_handle == right_handle) ? 1 : 0;
+                    break;
+                case CEE_CGT_UN:
+                    result_value = (left_handle != right_handle && left_handle != 0u) ? 1 : 0;
+                    break;
+                case CEE_CLT_UN:
+                    result_value = (right_handle != left_handle && right_handle != 0u) ? 1 : 0;
+                    break;
+                default:
+                    return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            return push_i4(frame, result_value);
+        }
+
         if (left->kind == ZACLR_STACK_VALUE_I8 || right->kind == ZACLR_STACK_VALUE_I8)
         {
             int64_t left_i8;
@@ -2025,7 +2400,8 @@ namespace
         }
     }
 
-    static struct zaclr_result write_array_indexed_value(struct zaclr_array_desc* array,
+    static struct zaclr_result write_array_indexed_value(struct zaclr_runtime* runtime,
+                                                         struct zaclr_array_desc* array,
                                                          uint32_t index,
                                                          enum zaclr_opcode opcode,
                                                          const struct zaclr_stack_value* value)
@@ -2040,7 +2416,7 @@ namespace
         zaclr_object_handle value_object;
         struct zaclr_result result;
 
-        if (array == NULL || value == NULL)
+        if (runtime == NULL || array == NULL || value == NULL)
         {
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
         }
@@ -2085,7 +2461,7 @@ namespace
                 write_u64(data + byte_offset, (uint64_t)stack_value_to_common_float_bits(value));
                 return zaclr_result_ok();
             case CEE_STELEM_REF:
-                result = stack_value_to_object_handle(value, &value_object);
+                result = stack_value_to_object_handle(runtime, value, &value_object);
                 if (result.status != ZACLR_STATUS_OK) return result;
                 write_u32(data + byte_offset, value_object);
                 return zaclr_result_ok();
@@ -2110,7 +2486,7 @@ namespace
                 {
                     if (token_is_heap_reference(element_type))
                     {
-                        result = stack_value_to_object_handle(value, &value_object);
+                        result = stack_value_to_object_handle(runtime, value, &value_object);
                         if (result.status != ZACLR_STATUS_OK) return result;
                         write_u32(data + byte_offset, value_object);
                         return zaclr_result_ok();
@@ -2145,198 +2521,9 @@ namespace
                                                           const struct zaclr_method_desc* target_method,
                                                           uint8_t invocation_kind)
     {
-        struct zaclr_internal_call_resolution internal_call = {};
-        struct zaclr_native_call_frame native_frame = {};
-        struct zaclr_result result;
-        uint32_t total_arguments;
-        uint32_t argument_index;
-        struct zaclr_stack_value* stack_arguments = NULL;
-        struct zaclr_stack_value* this_value = NULL;
-        struct zaclr_stack_value* native_arguments = NULL;
-        struct zaclr_stack_value injected_this = {};
-        uint8_t has_this;
-
-        if (context == NULL || frame == NULL || target_assembly == NULL || target_type == NULL || target_method == NULL)
-        {
-            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
-        }
-
-        ZACLR_TRACE_VALUE(context->runtime,
-                          ZACLR_TRACE_CATEGORY_INTEROP,
-                          ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                          "ExactBindToken",
-                          (uint64_t)target_method->token.raw);
-        ZACLR_TRACE_VALUE(context->runtime,
-                          ZACLR_TRACE_CATEGORY_INTEROP,
-                          ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                          target_method->name.text,
-                          (uint64_t)target_method->impl_flags);
-
-        result = zaclr_internal_call_registry_resolve_exact(&context->runtime->internal_calls,
-                                                            target_assembly,
-                                                            target_type,
-                                                            target_method,
-                                                            &internal_call);
-        if (result.status != ZACLR_STATUS_OK)
-        {
-            ZACLR_TRACE_VALUE(context->runtime,
-                              ZACLR_TRACE_CATEGORY_INTEROP,
-                              ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                              "ExactBindFail",
-                              (uint64_t)(((uint32_t)result.category << 16) | (uint32_t)result.status));
-            return result;
-        }
-
-        ZACLR_TRACE_VALUE(context->runtime,
-                          ZACLR_TRACE_CATEGORY_INTEROP,
-                          ZACLR_TRACE_EVENT_NATIVE_CALL,
-                          target_method->name.text,
-                          (uint64_t)target_method->token.raw);
-        ZACLR_TRACE_VALUE(context->runtime,
-                          ZACLR_TRACE_CATEGORY_INTEROP,
-                          ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                          "Running method",
-                          (uint64_t)target_method->token.raw);
-        ZACLR_TRACE_VALUE(context->runtime,
-                          ZACLR_TRACE_CATEGORY_INTEROP,
-                          ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                          "ExactBind.StackDepth",
-                          (uint64_t)zaclr_eval_stack_depth(&frame->eval_stack));
-        if (zaclr_eval_stack_depth(&frame->eval_stack) != 0u)
-        {
-            struct zaclr_stack_value peek0 = {};
-            if (zaclr_eval_stack_peek(&frame->eval_stack, &peek0).status == ZACLR_STATUS_OK)
-            {
-                ZACLR_TRACE_VALUE(context->runtime,
-                                  ZACLR_TRACE_CATEGORY_INTEROP,
-                                  ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                                  "ExactBind.Peek0Kind",
-                                  (uint64_t)peek0.kind);
-            }
-            if (zaclr_eval_stack_depth(&frame->eval_stack) > 1u)
-            {
-                ZACLR_TRACE_VALUE(context->runtime,
-                                  ZACLR_TRACE_CATEGORY_INTEROP,
-                                  ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                                  "ExactBind.Peek1Kind",
-                                  (uint64_t)frame->eval_stack.values[frame->eval_stack.depth - 2u].kind);
-            }
-            if (zaclr_eval_stack_depth(&frame->eval_stack) > 2u)
-            {
-                ZACLR_TRACE_VALUE(context->runtime,
-                                  ZACLR_TRACE_CATEGORY_INTEROP,
-                                  ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                                  "ExactBind.Peek2Kind",
-                                  (uint64_t)frame->eval_stack.values[frame->eval_stack.depth - 3u].kind);
-            }
-        }
-
-        has_this = (target_method->signature.calling_convention & 0x20u) != 0u ? 1u : 0u;
-        total_arguments = target_method->signature.parameter_count + ((has_this != 0u && invocation_kind != ZACLR_NATIVE_CALL_INVOCATION_NEWOBJ) ? 1u : 0u);
-        if (total_arguments != 0u)
-        {
-            stack_arguments = (struct zaclr_stack_value*)kernel_alloc(sizeof(struct zaclr_stack_value) * total_arguments);
-            if (stack_arguments == NULL)
-            {
-                return zaclr_result_make(ZACLR_STATUS_OUT_OF_MEMORY, ZACLR_STATUS_CATEGORY_INTEROP);
-            }
-        }
-
-        for (argument_index = total_arguments; argument_index > 0u; --argument_index)
-        {
-            result = zaclr_eval_stack_pop(&frame->eval_stack, &stack_arguments[argument_index - 1u]);
-            if (result.status != ZACLR_STATUS_OK)
-            {
-                if (stack_arguments != NULL)
-                {
-                    kernel_free(stack_arguments);
-                }
-                return result;
-            }
-        }
-
-        if (invocation_kind == ZACLR_NATIVE_CALL_INVOCATION_NEWOBJ && has_this != 0u)
-        {
-            zaclr_object_handle instance_handle = 0u;
-            result = allocate_reference_type_instance(context->runtime,
-                                                      target_assembly,
-                                                      target_method->owning_type_token,
-                                                      &instance_handle);
-            if (result.status != ZACLR_STATUS_OK)
-            {
-                if (stack_arguments != NULL)
-                {
-                    kernel_free(stack_arguments);
-                }
-                return result;
-            }
-
-            injected_this.kind = ZACLR_STACK_VALUE_OBJECT_HANDLE;
-            injected_this.data.object_handle = instance_handle;
-            this_value = &injected_this;
-            native_arguments = stack_arguments;
-        }
-        else if (has_this != 0u && stack_arguments != NULL)
-        {
-            ZACLR_TRACE_VALUE(context->runtime,
-                              ZACLR_TRACE_CATEGORY_INTEROP,
-                              ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                              "ExactBind.ThisKind",
-                              (uint64_t)stack_arguments[0].kind);
-            this_value = &stack_arguments[0];
-            native_arguments = &stack_arguments[1];
-        }
-
-        if (target_method->signature.parameter_count != 0u && stack_arguments != NULL)
-        {
-            ZACLR_TRACE_VALUE(context->runtime,
-                              ZACLR_TRACE_CATEGORY_INTEROP,
-                              ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                              "ExactBind.Arg0Kind",
-                              (uint64_t)stack_arguments[(has_this != 0u && invocation_kind != ZACLR_NATIVE_CALL_INVOCATION_NEWOBJ) ? 1u : 0u].kind);
-        }
-
-        if (has_this == 0u)
-        {
-            native_arguments = stack_arguments;
-        }
-
-        result = zaclr_build_native_call_frame(context->runtime,
-                                               frame,
-                                               target_assembly,
-                                               target_method,
-                                               invocation_kind,
-                                               has_this,
-                                               this_value,
-                                               (uint8_t)target_method->signature.parameter_count,
-                                               native_arguments,
-                                               &native_frame);
-        if (result.status != ZACLR_STATUS_OK)
-        {
-            if (stack_arguments != NULL)
-            {
-                kernel_free(stack_arguments);
-            }
-            return result;
-        }
-
-        result = zaclr_invoke_internal_call(&native_frame, internal_call.method);
-        if (stack_arguments != NULL)
-        {
-            kernel_free(stack_arguments);
-        }
-        if (result.status != ZACLR_STATUS_OK)
-        {
-            return result;
-        }
-
-        if (native_frame.has_result == 0u)
-        {
-            return zaclr_result_ok();
-        }
-
-        return zaclr_eval_stack_push(&frame->eval_stack, &native_frame.result_value);
+        return zaclr_invoke_internal_call_exact(context, frame, target_assembly, target_type, target_method, invocation_kind);
     }
+
 
 }
 
@@ -2371,10 +2558,37 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         //                   (uint64_t)frame->il_offset);
     }
 
+    if (frame->method != NULL
+        && frame->method->token.raw == 0x06000A4Bu
+        && frame->il_offset <= 12u)
+    {
+        console_write("[ZACLR][trace] Type.cctor il_offset=");
+        console_write_dec((uint64_t)frame->il_offset);
+        console_write(" opcode=");
+        console_write_hex64((uint64_t)opcode);
+        console_write(" depth=");
+        console_write_dec((uint64_t)frame->eval_stack.depth);
+        console_write(" locals=");
+        console_write_dec((uint64_t)frame->local_count);
+        console_write(" args=");
+        console_write_dec((uint64_t)frame->argument_count);
+        console_write("\n");
+    }
+
     switch (opcode)
     {
         case CEE_NOP:
             frame->il_offset += 1u;
+            return zaclr_result_ok();
+
+        case CEE_READONLY:
+        case CEE_VOLATILE:
+        case CEE_TAILCALL:
+            frame->il_offset += 2u;
+            return zaclr_result_ok();
+
+        case CEE_UNALIGNED:
+            frame->il_offset += 3u;
             return zaclr_result_ok();
 
         case CEE_LDARG_0:
@@ -2398,6 +2612,13 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             uint32_t argument_index = frame->il_start[frame->il_offset + 1u];
             frame->il_offset += 2u;
             return load_argument(frame, argument_index);
+        }
+
+        case CEE_LDARGA_S:
+        {
+            uint32_t argument_index = frame->il_start[frame->il_offset + 1u];
+            frame->il_offset += 2u;
+            return push_argument_address(frame, argument_index);
         }
 
         case CEE_STARG_S:
@@ -2431,6 +2652,100 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             return push_object_handle(frame, handle);
         }
 
+        case CEE_LDIND_U1:
+        {
+            struct zaclr_stack_value address_value = {};
+            struct zaclr_stack_value* target = NULL;
+            int32_t value = 0;
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &address_value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            if (address_value.kind != ZACLR_STACK_VALUE_LOCAL_ADDRESS && address_value.kind != ZACLR_STACK_VALUE_BYREF)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            frame->il_offset += 1u;
+            target = resolve_local_address_target(frame, &address_value);
+            if (target == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            switch (target->kind)
+            {
+                case ZACLR_STACK_VALUE_EMPTY:
+                    value = 0;
+                    break;
+                case ZACLR_STACK_VALUE_I4:
+                    value = (int32_t)((uint32_t)target->data.i4 & 0xFFu);
+                    break;
+                case ZACLR_STACK_VALUE_I8:
+                    value = (int32_t)((uint64_t)target->data.i8 & 0xFFu);
+                    break;
+                default:
+                    return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            return push_i4(frame, value);
+        }
+
+        case CEE_LDIND_U2:
+        {
+            struct zaclr_stack_value address_value = {};
+            struct zaclr_stack_value* target = NULL;
+            int32_t value = 0;
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &address_value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            if (address_value.kind != ZACLR_STACK_VALUE_LOCAL_ADDRESS && address_value.kind != ZACLR_STACK_VALUE_BYREF)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            frame->il_offset += 1u;
+            if (address_value.kind == ZACLR_STACK_VALUE_BYREF
+                && (address_value.flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) == 0u)
+            {
+                const uint16_t* raw_value = (const uint16_t*)(uintptr_t)address_value.data.raw;
+                if (raw_value == NULL)
+                {
+                    return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+                }
+
+                return push_i4(frame, (int32_t)(uint32_t)(*raw_value));
+            }
+
+            target = resolve_local_address_target(frame, &address_value);
+            if (target == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            switch (target->kind)
+            {
+                case ZACLR_STACK_VALUE_EMPTY:
+                    value = 0;
+                    break;
+                case ZACLR_STACK_VALUE_I4:
+                    value = (int32_t)((uint32_t)target->data.i4 & 0xFFFFu);
+                    break;
+                case ZACLR_STACK_VALUE_I8:
+                    value = (int32_t)((uint64_t)target->data.i8 & 0xFFFFu);
+                    break;
+                default:
+                    return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            return push_i4(frame, value);
+        }
+
         case CEE_LDSTR:
         {
             uint32_t token = read_u32(frame->il_start + frame->il_offset + 1u);
@@ -2453,6 +2768,9 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         {
             struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
             struct zaclr_token resolved_token = token;
+            struct zaclr_slice methodspec_instantiation_blob = {};
+            uint8_t has_methodspec_instantiation = 0u;
+            struct zaclr_result intrinsic_result;
             ZACLR_TRACE_VALUE(context->runtime,
                               ZACLR_TRACE_CATEGORY_EXEC,
                               ZACLR_TRACE_EVENT_CALL_TARGET,
@@ -2491,19 +2809,65 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_EXEC);
                 }
 
+                {
+                    struct zaclr_generic_context methodspec_context = {};
+                    result = zaclr_generic_context_set_method_instantiation(&methodspec_context,
+                                                                            frame->assembly,
+                                                                            context->runtime,
+                                                                            &instantiation_blob);
+                    zaclr_generic_context_reset(&methodspec_context);
+                    if (result.status != ZACLR_STATUS_OK)
+                    {
+                        return result.status == ZACLR_STATUS_NOT_IMPLEMENTED
+                            ? zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC)
+                            : result;
+                    }
+                }
+
                 method_tag = methodspec_row.method_coded_index & 0x1u;
                 method_row = methodspec_row.method_coded_index >> 1u;
+                if (token.raw == 0x2B00017Au)
+                {
+                    console_write("[ZACLR][call] MethodSpec 0x2B00017A coded_index=");
+                    console_write_hex64((uint64_t)methodspec_row.method_coded_index);
+                    console_write(" method_rows=");
+                    console_write_dec((uint64_t)zaclr_metadata_reader_get_row_count(&frame->assembly->metadata, ZACLR_TOKEN_TABLE_METHOD));
+                    console_write(" memberref_rows=");
+                    console_write_dec((uint64_t)zaclr_metadata_reader_get_row_count(&frame->assembly->metadata, ZACLR_TOKEN_TABLE_MEMBERREF));
+                    console_write(" param_rows=");
+                    console_write_dec((uint64_t)zaclr_metadata_reader_get_row_count(&frame->assembly->metadata, 0x08u));
+                    console_write(" inst_blob_size=");
+                    console_write_dec((uint64_t)instantiation_blob.size);
+                    console_write(" inst_arg_count=");
+                    console_write_dec((uint64_t)instantiation.argument_count);
+                    console_write(" first_byte=");
+                    console_write_hex64((uint64_t)(instantiation_blob.size > 0u ? instantiation_blob.data[0] : 0u));
+                    console_write("\n");
+                }
                 if (method_row == 0u)
                 {
                     return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_EXEC);
                 }
 
                 resolved_token = zaclr_token_make(((uint32_t)(method_tag == 0u ? ZACLR_TOKEN_TABLE_METHOD : ZACLR_TOKEN_TABLE_MEMBERREF) << 24) | method_row);
+                ZACLR_TRACE_VALUE(context->runtime,
+                                  ZACLR_TRACE_CATEGORY_EXEC,
+                                  ZACLR_TRACE_EVENT_CALL_TARGET,
+                                  "MethodSpec.MethodTag",
+                                  (uint64_t)method_tag);
+                ZACLR_TRACE_VALUE(context->runtime,
+                                  ZACLR_TRACE_CATEGORY_EXEC,
+                                  ZACLR_TRACE_EVENT_CALL_TARGET,
+                                  "MethodSpec.ResolvedToken",
+                                  (uint64_t)resolved_token.raw);
+                methodspec_instantiation_blob = instantiation_blob;
+                has_methodspec_instantiation = 1u;
             }
 
             if (zaclr_token_matches_table(&resolved_token, ZACLR_TOKEN_TABLE_METHOD))
             {
                 const struct zaclr_method_desc* method;
+                struct zaclr_loaded_assembly* target_assembly = NULL;
                 struct zaclr_frame* child;
                 struct zaclr_result result;
 
@@ -2513,11 +2877,197 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
                 }
 
+                if (token.raw == 0x2B00017Au)
+                {
+                    struct zaclr_methoddef_row debug_row = {};
+                    struct zaclr_signature_type parameter_type = {};
+                    uint32_t resolved_row = zaclr_token_row(&resolved_token);
+                    console_write("[ZACLR][call] MethodSpec 0x2B00017A resolved_name=");
+                    console_write(method->name.text != NULL ? method->name.text : "<null>");
+                    console_write(" param_count=");
+                    console_write_dec((uint64_t)method->signature.parameter_count);
+                    console_write(" callconv=");
+                    console_write_hex64((uint64_t)method->signature.calling_convention);
+                    if (zaclr_signature_read_method_parameter(&method->signature, 0u, &parameter_type).status == ZACLR_STATUS_OK)
+                    {
+                        console_write(" param0_elem=");
+                        console_write_hex64((uint64_t)parameter_type.element_type);
+                        console_write(" param0_flags=");
+                        console_write_hex64((uint64_t)parameter_type.flags);
+                        console_write(" param0_token=");
+                        console_write_hex64((uint64_t)parameter_type.type_token.raw);
+                    }
+                    console_write(" sig_size=");
+                    console_write_dec((uint64_t)method->signature.blob.size);
+                    console_write(" sig_b0=");
+                    console_write_hex64((uint64_t)(method->signature.blob.size > 0u ? method->signature.blob.data[0] : 0u));
+                    console_write(" sig_b1=");
+                    console_write_hex64((uint64_t)(method->signature.blob.size > 1u ? method->signature.blob.data[1] : 0u));
+                    console_write(" sig_b2=");
+                    console_write_hex64((uint64_t)(method->signature.blob.size > 2u ? method->signature.blob.data[2] : 0u));
+                    console_write(" sig_b3=");
+                    console_write_hex64((uint64_t)(method->signature.blob.size > 3u ? method->signature.blob.data[3] : 0u));
+                    if (zaclr_metadata_reader_get_methoddef_row(&frame->assembly->metadata,
+                                                                resolved_row,
+                                                                &debug_row).status == ZACLR_STATUS_OK)
+                    {
+                        console_write(" row_rva=");
+                        console_write_hex64((uint64_t)debug_row.rva);
+                        console_write(" row_name_index=");
+                        console_write_dec((uint64_t)debug_row.name_index);
+                        console_write(" row_sig_index=");
+                        console_write_dec((uint64_t)debug_row.signature_blob_index);
+                    }
+                    console_write("\n");
+                    for (uint32_t neighbor = resolved_row > 2u ? (resolved_row - 2u) : 1u;
+                         neighbor <= (resolved_row + 2u) && neighbor <= frame->assembly->method_map.count;
+                         ++neighbor)
+                    {
+                        const struct zaclr_method_desc* candidate = zaclr_method_map_find_by_token(&frame->assembly->method_map,
+                                                                                                   zaclr_token_make(((uint32_t)ZACLR_TOKEN_TABLE_METHOD << 24) | neighbor));
+                        console_write("[ZACLR][call] neighbor_row=");
+                        console_write_dec((uint64_t)neighbor);
+                        console_write(" name=");
+                        console_write(candidate != NULL && candidate->name.text != NULL ? candidate->name.text : "<null>");
+                        if (candidate != NULL)
+                        {
+                            const struct zaclr_type_desc* candidate_type = zaclr_type_map_find_by_token(&frame->assembly->type_map,
+                                                                                                          candidate->owning_type_token);
+                            console_write(" owner=");
+                            console_write(candidate_type != NULL && candidate_type->type_namespace.text != NULL ? candidate_type->type_namespace.text : "<null-ns>");
+                            console_write(".");
+                            console_write(candidate_type != NULL && candidate_type->type_name.text != NULL ? candidate_type->type_name.text : "<null-type>");
+                        }
+                        console_write(" param_count=");
+                        console_write_dec((uint64_t)(candidate != NULL ? candidate->signature.parameter_count : 0u));
+                        console_write(" rva=");
+                        console_write_hex64((uint64_t)(candidate != NULL ? candidate->rva : 0u));
+                        console_write("\n");
+                    }
+                    for (uint32_t probe = 260u; probe <= 264u && probe <= frame->assembly->method_map.count; ++probe)
+                    {
+                        const struct zaclr_method_desc* candidate = zaclr_method_map_find_by_token(&frame->assembly->method_map,
+                                                                                                   zaclr_token_make(((uint32_t)ZACLR_TOKEN_TABLE_METHOD << 24) | probe));
+                        console_write("[ZACLR][call] probe_row=");
+                        console_write_dec((uint64_t)probe);
+                        console_write(" name=");
+                        console_write(candidate != NULL && candidate->name.text != NULL ? candidate->name.text : "<null>");
+                        console_write(" owner=");
+                        if (candidate != NULL)
+                        {
+                            const struct zaclr_type_desc* candidate_type = zaclr_type_map_find_by_token(&frame->assembly->type_map,
+                                                                                                          candidate->owning_type_token);
+                            console_write(candidate_type != NULL && candidate_type->type_namespace.text != NULL ? candidate_type->type_namespace.text : "<null-ns>");
+                            console_write(".");
+                            console_write(candidate_type != NULL && candidate_type->type_name.text != NULL ? candidate_type->type_name.text : "<null-type>");
+                        }
+                        console_write(" param_count=");
+                        console_write_dec((uint64_t)(candidate != NULL ? candidate->signature.parameter_count : 0u));
+                        console_write("\n");
+                    }
+                }
+
+                if (method_is_type_initializer_trigger(method))
+                {
+                    result = ensure_type_initializer_ran(context->runtime,
+                                                         frame->assembly,
+                                                         zaclr_type_map_find_by_token(&frame->assembly->type_map,
+                                                                                      method->owning_type_token));
+                    if (result.status != ZACLR_STATUS_OK)
+                    {
+                        return result;
+                    }
+                }
+
+                if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_METHODSPEC))
+                {
+                    ZACLR_TRACE_VALUE(context->runtime,
+                                      ZACLR_TRACE_CATEGORY_EXEC,
+                                      ZACLR_TRACE_EVENT_CALL_TARGET,
+                                      method->name.text != NULL ? method->name.text : "<null-method-name>",
+                                      (uint64_t)method->token.raw);
+                    if (method->token.raw == 0x06008106u)
+                    {
+                        console_write("[ZACLR][call] ObjectHandleOnStack.Create parent_depth=");
+                        console_write_dec((uint64_t)frame->eval_stack.depth);
+                        console_write(" il_offset=");
+                        console_write_dec((uint64_t)frame->il_offset);
+                        console_write("\n");
+                    }
+                }
+
+                {
+                    const struct zaclr_type_desc* owning_type = zaclr_type_map_find_by_token(&frame->assembly->type_map, method->owning_type_token);
+                intrinsic_result = try_invoke_intrinsic(frame,
+                                                        frame->assembly,
+                                                        owning_type,
+                                                        method);
+                ZACLR_TRACE_VALUE(context->runtime,
+                                  ZACLR_TRACE_CATEGORY_EXEC,
+                                  ZACLR_TRACE_EVENT_CALL_TARGET,
+                                  "Call.MethodDef.IntrinsicStatus",
+                                  (uint64_t)intrinsic_result.status);
+                if (intrinsic_result.status == ZACLR_STATUS_OK)
+                {
+                    return intrinsic_result;
+                }
+}
+
                 /*
                  * Exact native binding still runs on resolved bodyless methods.
                  * Do not require impl_flags here as the primary gate; the resolved
                  * method body state plus exact runtime bind decides the outcome.
                  */
+                {
+                    struct zaclr_method_dispatch_info dispatch_info = {};
+                    struct zaclr_result dispatch_result = zaclr_classify_method_dispatch(method, &dispatch_info);
+
+                    if (dispatch_result.status != ZACLR_STATUS_OK)
+                    {
+                        return dispatch_result;
+                    }
+
+                    if (dispatch_info.kind == ZACLR_DISPATCH_KIND_INTERNAL_CALL)
+                    {
+                        const struct zaclr_type_desc* owning_type = zaclr_type_map_find_by_token(&frame->assembly->type_map,
+                                                                                                  method->owning_type_token);
+                        if (owning_type == NULL)
+                        {
+                            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+                        }
+
+                        return invoke_internal_call_exact(context,
+                                                          frame,
+                                                          frame->assembly,
+                                                          owning_type,
+                                                          method,
+                                                          ZACLR_NATIVE_CALL_INVOCATION_CALL);
+                    }
+
+                    if (dispatch_info.kind == ZACLR_DISPATCH_KIND_QCALL)
+                    {
+                        zaclr_native_frame_handler handler = zaclr_qcall_table_resolve(&context->runtime->qcall_table,
+                                                                                       dispatch_info.qcall_entry_point);
+                        if (handler == NULL)
+                        {
+                            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_INTEROP);
+                        }
+
+                        return zaclr_invoke_native_frame_handler_exact(context,
+                                                                       frame,
+                                                                       frame->assembly,
+                                                                       method,
+                                                                       handler,
+                                                                       ZACLR_NATIVE_CALL_INVOCATION_CALL);
+                    }
+
+                    if (dispatch_info.kind == ZACLR_DISPATCH_KIND_PINVOKE
+                        || dispatch_info.kind == ZACLR_DISPATCH_KIND_NOT_IMPLEMENTED)
+                    {
+                        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_INTEROP);
+                    }
+                }
+
                 if (method->rva == 0u)
                 {
                     const struct zaclr_type_desc* owning_type = zaclr_type_map_find_by_token(&frame->assembly->type_map,
@@ -2551,12 +3101,61 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                   method->name.text,
                                   (uint64_t)method->token.raw);
 
-                        result = zaclr_frame_create_child(context->engine,
-                                                          context->runtime,
-                                                          frame,
-                                                          frame->assembly,
-                                                          method,
-                                                          &child);
+                intrinsic_result = try_invoke_intrinsic(frame,
+                                                        frame->assembly,
+                                                        zaclr_type_map_find_by_token(&frame->assembly->type_map, method->owning_type_token),
+                                                        method);
+                ZACLR_TRACE_VALUE(context->runtime,
+                                  ZACLR_TRACE_CATEGORY_EXEC,
+                                  ZACLR_TRACE_EVENT_CALL_TARGET,
+                                  "Call.MethodDef.IntrinsicStatus",
+                                  (uint64_t)intrinsic_result.status);
+                if (intrinsic_result.status == ZACLR_STATUS_OK)
+                {
+                    return intrinsic_result;
+                }
+
+                /* Virtual dispatch: for callvirt, resolve the override
+                   through the runtime object's vtable */
+                if (opcode == CEE_CALLVIRT
+                    && (method->method_flags & METHOD_FLAG_VIRTUAL) != 0u
+                    && frame->eval_stack.depth > 0u)
+                {
+                    /* The 'this' argument is below the other args on the stack.
+                       For instance methods, this is at depth - parameter_count. */
+                    uint32_t this_index = frame->eval_stack.depth - method->signature.parameter_count - 1u;
+                    if (this_index < frame->eval_stack.depth)
+                    {
+                        const struct zaclr_stack_value* this_val = &frame->eval_stack.values[this_index];
+                        if (this_val->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE
+                            && this_val->data.object_reference != NULL)
+                        {
+                            const struct zaclr_method_table* runtime_mt =
+                                this_val->data.object_reference->header.method_table;
+                            if (runtime_mt != NULL)
+                            {
+                                const struct zaclr_method_desc* override =
+                                    zaclr_method_table_resolve_virtual(runtime_mt, method);
+                                if (override != NULL && override != method)
+                                {
+                                    /* Switch to the override's owning assembly and method */
+                                    method = override;
+                                    if (runtime_mt->assembly != NULL)
+                                    {
+                                        target_assembly = (struct zaclr_loaded_assembly*)runtime_mt->assembly;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                result = zaclr_frame_create_child(context->engine,
+                                                  context->runtime,
+                                                  frame,
+                                                  target_assembly != NULL ? target_assembly : frame->assembly,
+                                                  method,
+                                                  &child);
                         ZACLR_TRACE_VALUE(context->runtime,
                                           ZACLR_TRACE_CATEGORY_EXEC,
                                           ZACLR_TRACE_EVENT_CALL_TARGET,
@@ -2565,6 +3164,21 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                         if (result.status != ZACLR_STATUS_OK)
                         {
                             return result;
+                        }
+
+                        if (has_methodspec_instantiation != 0u)
+                        {
+                            result = zaclr_generic_context_set_method_instantiation(&child->generic_context,
+                                                                                    frame->assembly,
+                                                                                    context->runtime,
+                                                                                    &methodspec_instantiation_blob);
+                            if (result.status != ZACLR_STATUS_OK)
+                            {
+                                zaclr_frame_destroy(child);
+                                return result.status == ZACLR_STATUS_NOT_IMPLEMENTED
+                                    ? zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC)
+                                    : result;
+                            }
                         }
 
                         result = zaclr_frame_bind_arguments(child, &frame->eval_stack);
@@ -2588,9 +3202,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 struct zaclr_memberref_target memberref = {};
                 return zaclr_metadata_get_memberref_info(frame->assembly, resolved_token, &memberref).status == ZACLR_STATUS_OK
                     ? ([&]() -> struct zaclr_result {
-                        const struct zaclr_loaded_assembly* target_assembly;
-                        const struct zaclr_type_desc* target_type;
-                        const struct zaclr_method_desc* target_method;
+                        struct zaclr_call_target target = {};
                         struct zaclr_frame* child;
                         struct zaclr_result result;
 
@@ -2599,50 +3211,153 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                             return zaclr_result_ok();
                         }
 
-                        result = zaclr_member_resolution_resolve_method(context->runtime,
-                                                                       frame->assembly,
-                                                                       &memberref,
-                                                                       &target_assembly,
-                                                                       &target_type,
-                                                                       &target_method);
+                        result = zaclr_call_target_resolve_memberref(context->runtime,
+                                                                    frame->assembly,
+                                                                    &memberref,
+                                                                    has_methodspec_instantiation != 0u ? &methodspec_instantiation_blob : NULL,
+                                                                    &target);
                         if (result.status != ZACLR_STATUS_OK)
                         {
                             return result;
                         }
 
+                        console_write("[ZACLR][call] resolved ptrs asm=");
+                        console_write_hex64((uint64_t)(uintptr_t)target.assembly);
+                        console_write(" type=");
+                        console_write_hex64((uint64_t)(uintptr_t)target.owning_type);
+                        console_write(" method=");
+                        console_write_hex64((uint64_t)(uintptr_t)target.method);
+                        console_write("\n");
+
+                        if (method_is_type_initializer_trigger(target.method))
+                        {
+                            console_write("[ZACLR][call] before cctor asm_ptr=");
+                            console_write_hex64((uint64_t)(uintptr_t)target.assembly);
+                            console_write(" method_ptr=");
+                            console_write_hex64((uint64_t)(uintptr_t)target.method);
+                            console_write("\n");
+                            result = ensure_type_initializer_ran(context->runtime,
+                                                                 target.assembly,
+                                                                 target.owning_type);
+                            if (result.status != ZACLR_STATUS_OK)
+                            {
+                                zaclr_call_target_reset(&target);
+                                return result;
+                            }
+
+                            console_write("[ZACLR][call] after cctor asm_ptr=");
+                            console_write_hex64((uint64_t)(uintptr_t)target.assembly);
+                            console_write(" method_ptr=");
+                            console_write_hex64((uint64_t)(uintptr_t)target.method);
+                            console_write(" registry_entries=");
+                            console_write_hex64((uint64_t)(uintptr_t)context->runtime->assemblies.entries);
+                            console_write(" count=");
+                            console_write_dec((uint64_t)context->runtime->assemblies.count);
+                            console_write("\n");
+                        }
+
                         ZACLR_TRACE_VALUE(context->runtime,
                                           ZACLR_TRACE_CATEGORY_EXEC,
                                           ZACLR_TRACE_EVENT_CALL_TARGET,
-                                          target_assembly->assembly_name.text,
-                                          (uint64_t)target_assembly->id);
+                                          target.assembly->assembly_name.text,
+                                          (uint64_t)target.assembly->id);
 
                         ZACLR_TRACE_VALUE(context->runtime,
                                           ZACLR_TRACE_CATEGORY_INTEROP,
                                           ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
                                           "ResolvedMemberRefMethod",
-                                          (uint64_t)target_method->token.raw);
+                                          (uint64_t)target.method->token.raw);
                         ZACLR_TRACE_VALUE(context->runtime,
                                           ZACLR_TRACE_CATEGORY_INTEROP,
                                           ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
-                                          target_method->name.text,
-                                          (uint64_t)target_method->impl_flags);
+                                          target.method->name.text,
+                                          (uint64_t)target.method->impl_flags);
+
+                        intrinsic_result = try_invoke_intrinsic(frame,
+                                                                target.assembly,
+                                                                target.owning_type,
+                                                                target.method);
+                        ZACLR_TRACE_VALUE(context->runtime,
+                                          ZACLR_TRACE_CATEGORY_EXEC,
+                                          ZACLR_TRACE_EVENT_CALL_TARGET,
+                                          "Call.MemberRef.IntrinsicStatus",
+                                          (uint64_t)intrinsic_result.status);
+                        if (intrinsic_result.status == ZACLR_STATUS_OK)
+                        {
+                            zaclr_call_target_reset(&target);
+                            return intrinsic_result;
+                        }
+
+                        {
+                            struct zaclr_method_dispatch_info dispatch_info = {};
+                            struct zaclr_result dispatch_result = zaclr_classify_method_dispatch(target.method, &dispatch_info);
+
+                            if (dispatch_result.status != ZACLR_STATUS_OK)
+                            {
+                                zaclr_call_target_reset(&target);
+                                return dispatch_result;
+                            }
+
+                            if (dispatch_info.kind == ZACLR_DISPATCH_KIND_INTERNAL_CALL)
+                            {
+                                struct zaclr_result call_result = invoke_internal_call_exact(context,
+                                                                                            frame,
+                                                                                            target.assembly,
+                                                                                            target.owning_type,
+                                                                                            target.method,
+                                                                                            ZACLR_NATIVE_CALL_INVOCATION_CALL);
+                                zaclr_call_target_reset(&target);
+                                return call_result;
+                            }
+
+                            if (dispatch_info.kind == ZACLR_DISPATCH_KIND_QCALL)
+                            {
+                                zaclr_native_frame_handler handler = zaclr_qcall_table_resolve(&context->runtime->qcall_table,
+                                                                                               dispatch_info.qcall_entry_point);
+                                if (handler == NULL)
+                                {
+                                    zaclr_call_target_reset(&target);
+                                    return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_INTEROP);
+                                }
+
+                                {
+                                    struct zaclr_result call_result = zaclr_invoke_native_frame_handler_exact(context,
+                                                                                                               frame,
+                                                                                                               target.assembly,
+                                                                                                               target.method,
+                                                                                                               handler,
+                                                                                                               ZACLR_NATIVE_CALL_INVOCATION_CALL);
+                                    zaclr_call_target_reset(&target);
+                                    return call_result;
+                                }
+                            }
+
+                            if (dispatch_info.kind == ZACLR_DISPATCH_KIND_PINVOKE
+                                || dispatch_info.kind == ZACLR_DISPATCH_KIND_NOT_IMPLEMENTED)
+                            {
+                                zaclr_call_target_reset(&target);
+                                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_INTEROP);
+                            }
+                        }
 
                         /* Same rule for resolved cross-assembly bodyless methods. */
-                        if (target_method->rva == 0u)
+                        if (target.method->rva == 0u)
                         {
-                            return invoke_internal_call_exact(context,
-                                                              frame,
-                                                              target_assembly,
-                                                              target_type,
-                                                              target_method,
-                                                              ZACLR_NATIVE_CALL_INVOCATION_CALL);
+                            struct zaclr_result call_result = invoke_internal_call_exact(context,
+                                                                                        frame,
+                                                                                        target.assembly,
+                                                                                        target.owning_type,
+                                                                                        target.method,
+                                                                                        ZACLR_NATIVE_CALL_INVOCATION_CALL);
+                            zaclr_call_target_reset(&target);
+                            return call_result;
                         }
 
                         result = zaclr_frame_create_child(context->engine,
                                                           context->runtime,
                                                           frame,
-                                                          target_assembly,
-                                                          target_method,
+                                                          target.assembly,
+                                                          target.method,
                                                           &child);
                         ZACLR_TRACE_VALUE(context->runtime,
                                           ZACLR_TRACE_CATEGORY_EXEC,
@@ -2651,7 +3366,20 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                           (uint64_t)result.status);
                         if (result.status != ZACLR_STATUS_OK)
                         {
+                            zaclr_call_target_reset(&target);
                             return result;
+                        }
+
+                        if (target.has_method_instantiation != 0u)
+                        {
+                            result = zaclr_generic_context_clone(&child->generic_context,
+                                                                 &target.method_generic_context);
+                            if (result.status != ZACLR_STATUS_OK)
+                            {
+                                zaclr_frame_destroy(child);
+                                zaclr_call_target_reset(&target);
+                                return result;
+                            }
                         }
 
                         result = zaclr_frame_bind_arguments(child, &frame->eval_stack);
@@ -2663,9 +3391,11 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                         if (result.status != ZACLR_STATUS_OK)
                         {
                             zaclr_frame_destroy(child);
+                            zaclr_call_target_reset(&target);
                             return result;
                         }
 
+                        zaclr_call_target_reset(&target);
                         *context->current_frame = child;
                         return zaclr_result_ok();
                     })()
@@ -2697,6 +3427,15 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
                 }
 
+                result = ensure_type_initializer_ran(context->runtime,
+                                                     frame->assembly,
+                                                     zaclr_type_map_find_by_token(&frame->assembly->type_map,
+                                                                                  method->owning_type_token));
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+
                 result = allocate_reference_type_instance(frame->runtime,
                                                           frame->assembly,
                                                           method->owning_type_token,
@@ -2724,6 +3463,116 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                   (uint64_t)result.status);
                 if (result.status != ZACLR_STATUS_OK)
                 {
+                    const struct zaclr_type_desc* owning_type = zaclr_type_map_find_by_token(&frame->assembly->type_map,
+                                                                                              method->owning_type_token);
+                    struct zaclr_method_table* owning_method_table = NULL;
+                    bool is_delegate_ctor = false;
+
+                    if (owning_type != NULL)
+                    {
+                        struct zaclr_result prepare_result = zaclr_type_prepare(frame->runtime,
+                                                                              (struct zaclr_loaded_assembly*)frame->assembly,
+                                                                              owning_type,
+                                                                              &owning_method_table);
+                        ZACLR_TRACE_VALUE(context->runtime,
+                                          ZACLR_TRACE_CATEGORY_EXEC,
+                                          ZACLR_TRACE_EVENT_CALL_TARGET,
+                                          "NewObj.Delegate.PrepareStatus",
+                                          (uint64_t)prepare_result.status);
+                        if (prepare_result.status == ZACLR_STATUS_OK
+                            && owning_method_table != NULL
+                            && zaclr_method_table_is_delegate(owning_method_table) != 0u)
+                        {
+                            is_delegate_ctor = true;
+                        }
+                    }
+
+                    ZACLR_TRACE_VALUE(context->runtime,
+                                      ZACLR_TRACE_CATEGORY_EXEC,
+                                      ZACLR_TRACE_EVENT_CALL_TARGET,
+                                      "NewObj.Delegate.IsDelegateCtor",
+                                      (uint64_t)(is_delegate_ctor ? 1u : 0u));
+
+                    if (result.status == ZACLR_STATUS_NOT_FOUND
+                        && method->rva == 0u
+                        && method->name.text != NULL
+                        && text_equals(method->name.text, ".ctor")
+                        && owning_type != NULL
+                        && is_delegate_ctor)
+                    {
+                        struct zaclr_stack_value method_ptr_value = {};
+                        struct zaclr_stack_value target_value = {};
+                        struct zaclr_object_desc* delegate_object;
+                        struct zaclr_method_handle method_handle = {};
+                        uintptr_t packed_method_handle = 0u;
+                        struct zaclr_result pop_result;
+
+                        if (method->signature.parameter_count < 2u)
+                        {
+                            return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_EXEC);
+                        }
+
+                        pop_result = zaclr_eval_stack_pop(&frame->eval_stack, &method_ptr_value);
+                        if (pop_result.status != ZACLR_STATUS_OK)
+                        {
+                            return pop_result;
+                        }
+
+                        pop_result = zaclr_eval_stack_pop(&frame->eval_stack, &target_value);
+                        if (pop_result.status != ZACLR_STATUS_OK)
+                        {
+                            return pop_result;
+                        }
+
+                        if (method_ptr_value.kind == ZACLR_STACK_VALUE_I8)
+                        {
+                            packed_method_handle = (uintptr_t)method_ptr_value.data.i8;
+                        }
+                        else if (method_ptr_value.kind == ZACLR_STACK_VALUE_I4)
+                        {
+                            packed_method_handle = (uintptr_t)(uint32_t)method_ptr_value.data.i4;
+                        }
+                        else
+                        {
+                            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+                        }
+
+                        pop_result = zaclr_method_handle_unpack(packed_method_handle, &method_handle);
+                        ZACLR_TRACE_VALUE(context->runtime,
+                                          ZACLR_TRACE_CATEGORY_EXEC,
+                                          ZACLR_TRACE_EVENT_CALL_TARGET,
+                                          "NewObj.Delegate.UnpackStatus",
+                                          (uint64_t)pop_result.status);
+                        if (pop_result.status != ZACLR_STATUS_OK)
+                        {
+                            return pop_result;
+                        }
+
+                        delegate_object = zaclr_heap_get_object(&frame->runtime->heap, instance_handle);
+                        if (delegate_object == NULL)
+                        {
+                            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+                        }
+
+                        pop_result = zaclr_delegate_runtime_bind_singlecast(frame->runtime,
+                                                                            delegate_object,
+                                                                            frame->assembly,
+                                                                            owning_type,
+                                                                            &target_value,
+                                                                            &method_handle);
+                        ZACLR_TRACE_VALUE(context->runtime,
+                                          ZACLR_TRACE_CATEGORY_EXEC,
+                                          ZACLR_TRACE_EVENT_CALL_TARGET,
+                                          "NewObj.Delegate.BindSinglecastStatus",
+                                          (uint64_t)pop_result.status);
+                        if (pop_result.status != ZACLR_STATUS_OK)
+                        {
+                            return pop_result;
+                        }
+
+                        return push_object_handle(frame, instance_handle);
+                    }
+
                     return result;
                 }
 
@@ -2738,6 +3587,8 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     zaclr_frame_destroy(child);
                     return result;
                 }
+
+                child->flags |= k_zaclr_frame_flag_newobj_ctor;
 
                 *context->current_frame = child;
                 return zaclr_result_ok();
@@ -2779,16 +3630,44 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 const struct zaclr_type_desc* target_type = NULL;
                 const struct zaclr_method_desc* target_method = NULL;
 
-            result = zaclr_member_resolution_resolve_method(frame->runtime,
-                                                            frame->assembly,
-                                                            &memberref,
-                                                            &target_assembly,
-                                                            &target_type,
-                                                            &target_method);
+                console_write("[ZACLR][call] memberref resolve begin assembly=");
+                console_write(memberref.assembly_name != NULL ? memberref.assembly_name : "<null>");
+                console_write(" type=");
+                console_write(memberref.key.type_name != NULL ? memberref.key.type_name : "<null>");
+                console_write(" method=");
+                console_write(memberref.key.method_name != NULL ? memberref.key.method_name : "<null>");
+                console_write("\n");
+
+                result = zaclr_member_resolution_resolve_method(frame->runtime,
+                                                                frame->assembly,
+                                                                &memberref,
+                                                                &target_assembly,
+                                                                &target_type,
+                                                                &target_method);
                 if (result.status != ZACLR_STATUS_OK)
                 {
+                    console_write("[ZACLR][call] memberref resolve failed\n");
                     return result;
                 }
+
+                console_write("[ZACLR][call] memberref resolve ok assembly=");
+                console_write(target_assembly != NULL && target_assembly->assembly_name.text != NULL ? target_assembly->assembly_name.text : "<null>");
+                console_write(" type=");
+                console_write(target_type != NULL && target_type->type_name.text != NULL ? target_type->type_name.text : "<null>");
+                console_write(" method=");
+                console_write(target_method != NULL && target_method->name.text != NULL ? target_method->name.text : "<null>");
+                console_write("\n");
+
+                result = ensure_type_initializer_ran(context->runtime,
+                                                     target_assembly,
+                                                     target_type);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    console_write("[ZACLR][call] ensure_type_initializer_ran failed\n");
+                    return result;
+                }
+
+                console_write("[ZACLR][call] after ensure_type_initializer_ran\n");
 
                 ZACLR_TRACE_VALUE(context->runtime,
                                   ZACLR_TRACE_CATEGORY_EXEC,
@@ -2810,6 +3689,49 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                   ZACLR_TRACE_EVENT_CALL_TARGET,
                                   target_method != NULL ? target_method->name.text : "<null>",
                                   target_method != NULL ? (uint64_t)target_method->impl_flags : 0u);
+
+                {
+                    struct zaclr_method_dispatch_info dispatch_info = {};
+                    struct zaclr_result dispatch_result = zaclr_classify_method_dispatch(target_method, &dispatch_info);
+
+                    if (dispatch_result.status != ZACLR_STATUS_OK)
+                    {
+                        return dispatch_result;
+                    }
+
+                    if (dispatch_info.kind == ZACLR_DISPATCH_KIND_INTERNAL_CALL)
+                    {
+                        return invoke_internal_call_exact(context,
+                                                          frame,
+                                                          target_assembly,
+                                                          target_type,
+                                                          target_method,
+                                                          ZACLR_NATIVE_CALL_INVOCATION_NEWOBJ);
+                    }
+
+                    if (dispatch_info.kind == ZACLR_DISPATCH_KIND_QCALL)
+                    {
+                        zaclr_native_frame_handler handler = zaclr_qcall_table_resolve(&context->runtime->qcall_table,
+                                                                                       dispatch_info.qcall_entry_point);
+                        if (handler == NULL)
+                        {
+                            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_INTEROP);
+                        }
+
+                        return zaclr_invoke_native_frame_handler_exact(context,
+                                                                       frame,
+                                                                       target_assembly,
+                                                                       target_method,
+                                                                       handler,
+                                                                       ZACLR_NATIVE_CALL_INVOCATION_NEWOBJ);
+                    }
+
+                    if (dispatch_info.kind == ZACLR_DISPATCH_KIND_PINVOKE
+                        || dispatch_info.kind == ZACLR_DISPATCH_KIND_NOT_IMPLEMENTED)
+                    {
+                        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_INTEROP);
+                    }
+                }
 
                 if ((target_method->impl_flags & k_method_impl_flag_internal_call) != 0u)
                 {
@@ -2881,6 +3803,8 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     return result;
                 }
 
+                child->flags |= k_zaclr_frame_flag_newobj_ctor;
+
                 *context->current_frame = child;
                 return zaclr_result_ok();
             }
@@ -2900,6 +3824,16 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             frame->il_offset += 5u;
+            if (value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+            {
+                return zaclr_eval_stack_push(&frame->eval_stack, &value);
+            }
+
+            if (value.kind == ZACLR_STACK_VALUE_BYREF)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
             result = box_stack_value(frame->runtime, &value, token, &handle);
             if (result.status != ZACLR_STATUS_OK)
             {
@@ -2921,7 +3855,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             frame->il_offset += 5u;
-            result = stack_value_to_object_handle(&value, &handle);
+            result = stack_value_to_object_handle(frame->runtime, &value, &handle);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
@@ -2936,6 +3870,155 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             return zaclr_eval_stack_push(&frame->eval_stack, &value);
         }
 
+        case CEE_UNBOX:
+        {
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
+            struct zaclr_stack_value value = {};
+            zaclr_object_handle handle = 0u;
+            const struct zaclr_boxed_value_desc* boxed_value;
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            frame->il_offset += 5u;
+            result = stack_value_to_object_handle(frame->runtime, &value, &handle);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            boxed_value = zaclr_boxed_value_from_handle_const(&frame->runtime->heap, handle);
+            if (boxed_value == NULL || boxed_value->type_token_raw != token.raw)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            {
+                struct zaclr_stack_value address_value = {};
+                result = zaclr_stack_value_set_byref(&address_value,
+                                                    (void*)&((struct zaclr_boxed_value_desc*)boxed_value)->value,
+                                                    sizeof(struct zaclr_stack_value),
+                                                    token.raw,
+                                                    ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+
+                return zaclr_eval_stack_push(&frame->eval_stack, &address_value);
+            }
+        }
+
+        case CEE_STOBJ:
+        {
+            struct zaclr_stack_value value = {};
+            struct zaclr_stack_value address = {};
+            struct zaclr_resolved_byref target = {};
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = resolve_byref_target(frame, &address, &target);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            frame->il_offset += 5u;
+            if (target.stack_slot != NULL)
+            {
+                return zaclr_stack_value_assign(target.stack_slot, &value);
+            }
+
+            if (target.address == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            if (value.kind == ZACLR_STACK_VALUE_VALUETYPE)
+            {
+                if (value.payload_size > target.payload_size)
+                {
+                    return zaclr_result_make(ZACLR_STATUS_BUFFER_TOO_SMALL, ZACLR_STATUS_CATEGORY_EXEC);
+                }
+
+                kernel_memcpy(target.address, zaclr_stack_value_payload_const(&value), value.payload_size);
+                return zaclr_result_ok();
+            }
+
+            if (value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+            {
+                zaclr_object_handle handle = zaclr_heap_get_object_handle(&frame->runtime->heap, value.data.object_reference);
+                kernel_memcpy(target.address, &handle, sizeof(handle));
+                return zaclr_result_ok();
+            }
+
+            if (value.kind == ZACLR_STACK_VALUE_I4)
+            {
+                kernel_memcpy(target.address, &value.data.i4, target.payload_size < sizeof(value.data.i4) ? target.payload_size : sizeof(value.data.i4));
+                return zaclr_result_ok();
+            }
+
+            if (value.kind == ZACLR_STACK_VALUE_I8)
+            {
+                kernel_memcpy(target.address, &value.data.i8, target.payload_size < sizeof(value.data.i8) ? target.payload_size : sizeof(value.data.i8));
+                return zaclr_result_ok();
+            }
+
+            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        case CEE_STIND_I1:
+        {
+            struct zaclr_stack_value value = {};
+            struct zaclr_stack_value address = {};
+            struct zaclr_stack_value* target;
+            int32_t value_i4;
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            if (address.kind != ZACLR_STACK_VALUE_LOCAL_ADDRESS && address.kind != ZACLR_STACK_VALUE_BYREF)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            target = resolve_local_address_target(frame, &address);
+            if (target == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            result = stack_value_to_i32(&value, &value_i4);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            frame->il_offset += 1u;
+            target->kind = ZACLR_STACK_VALUE_I4;
+            target->data.i4 = (int32_t)(int8_t)value_i4;
+            return zaclr_result_ok();
+        }
+
         case CEE_ISINST:
         {
             struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
@@ -2948,7 +4031,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             frame->il_offset += 5u;
-            result = stack_value_to_object_handle(&value, &handle);
+            result = stack_value_to_object_handle(frame->runtime, &value, &handle);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
@@ -2972,7 +4055,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             frame->il_offset += 5u;
-            result = stack_value_to_object_handle(&value, &handle);
+            result = stack_value_to_object_handle(frame->runtime, &value, &handle);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
@@ -2988,33 +4071,45 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 
         case CEE_INITOBJ:
         {
-            struct zaclr_stack_value address_value;
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 2u));
+            struct zaclr_stack_value address_value = {};
+            struct zaclr_resolved_byref target = {};
             struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &address_value);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
-            if (address_value.kind != ZACLR_STACK_VALUE_LOCAL_ADDRESS || address_value.data.raw >= frame->local_count)
-            {
-                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
-            }
-
-            frame->il_offset += 6u;
-            zaclr_object_handle handle = 0u;
-            result = zaclr_reference_object_allocate(&frame->runtime->heap,
-                                                     NULL,
-                                                     0u,
-                                                     zaclr_token_make(0u),
-                                                     0u,
-                                                     &handle);
+            result = resolve_byref_target(frame, &address_value, &target);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
-            frame->locals[address_value.data.raw].kind = ZACLR_STACK_VALUE_OBJECT_HANDLE;
-            frame->locals[address_value.data.raw].data.object_handle = handle;
+            frame->il_offset += 6u;
+
+            if (target.stack_slot != NULL)
+            {
+                uint8_t zero_bytes[ZACLR_STACK_VALUE_INLINE_BUFFER_BYTES] = {};
+                if (target.payload_size == sizeof(struct zaclr_stack_value)
+                    && (target.stack_slot->kind == ZACLR_STACK_VALUE_EMPTY || stack_value_kind_is_scalar(target.stack_slot->kind)))
+                {
+                    zaclr_stack_value_reset(target.stack_slot);
+                    return zaclr_result_ok();
+                }
+
+                return zaclr_stack_value_set_valuetype(target.stack_slot,
+                                                       token.raw,
+                                                       zero_bytes,
+                                                       0u);
+            }
+
+            if (target.address == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            kernel_memset(target.address, 0, target.payload_size);
             return zaclr_result_ok();
         }
 
@@ -3044,8 +4139,28 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         case CEE_STSFLD:
         {
             struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
+            if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+            {
+                console_write("[ZACLR][exec] Type.cctor stsfld token=");
+                console_write_hex64((uint64_t)token.raw);
+                console_write(" depth_before=");
+                console_write_dec((uint64_t)frame->eval_stack.depth);
+                console_write("\n");
+            }
             frame->il_offset += 5u;
-            return store_static_field(frame, token);
+            {
+                struct zaclr_result result = store_static_field(frame, token);
+                if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+                {
+                    console_write("[ZACLR][exec] Type.cctor stsfld status=");
+                    console_write_dec((uint64_t)result.status);
+                    console_write(" depth_after=");
+                    console_write_dec((uint64_t)frame->eval_stack.depth);
+                    console_write("\n");
+                }
+
+                return result;
+            }
         }
 
         case CEE_STFLD:
@@ -3054,7 +4169,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             struct zaclr_memberref_target memberref = {};
             struct zaclr_stack_value field_value;
             struct zaclr_stack_value object_value;
-            zaclr_object_handle handle;
+            struct zaclr_object_desc* object;
             struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &field_value);
             if (result.status != ZACLR_STATUS_OK)
             {
@@ -3067,7 +4182,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
-            if (object_value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+            if (object_value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS || object_value.kind == ZACLR_STACK_VALUE_BYREF)
             {
                 struct zaclr_stack_value* target = resolve_local_address_target(frame, &object_value);
                 if (target == NULL)
@@ -3075,10 +4190,17 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
                 }
 
+                if (target->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+                {
+                    frame->il_offset += 5u;
+                    *target = field_value;
+                    return zaclr_result_ok();
+                }
+
                 object_value = *target;
             }
 
-            result = stack_value_to_object_handle(&object_value, &handle);
+            result = stack_value_to_object_reference(frame->runtime, &object_value, &object);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
@@ -3108,7 +4230,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             frame->il_offset += 5u;
-            return store_object_field(frame->runtime, handle, token, &field_value);
+            return store_object_field(frame->runtime, object, token, &field_value);
         }
 
         case CEE_LDFLD:
@@ -3117,13 +4239,14 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             struct zaclr_memberref_target memberref = {};
             struct zaclr_stack_value object_value;
             struct zaclr_stack_value field_value;
-            zaclr_object_handle handle;
+            struct zaclr_object_desc* object;
             struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &object_value);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
+            /*
             ZACLR_TRACE_VALUE(context->runtime,
                               ZACLR_TRACE_CATEGORY_EXEC,
                               ZACLR_TRACE_EVENT_CALL_TARGET,
@@ -3134,24 +4257,46 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                               ZACLR_TRACE_EVENT_CALL_TARGET,
                               "Ldfld.Token",
                               (uint64_t)token.raw);
+            */
 
-            if (object_value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+            if (object_value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS || object_value.kind == ZACLR_STACK_VALUE_BYREF)
             {
-                struct zaclr_stack_value* target = resolve_local_address_target(frame, &object_value);
-                if (target == NULL)
+                struct zaclr_resolved_byref target = {};
+                result = resolve_byref_target(frame, &object_value, &target);
+                if (result.status != ZACLR_STATUS_OK)
                 {
-                    return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+                    return result;
                 }
 
-                object_value = *target;
+                if (target.stack_slot != NULL)
+                {
+                    if (target.stack_slot->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+                    {
+                        frame->il_offset += 5u;
+                        return zaclr_eval_stack_push(&frame->eval_stack, target.stack_slot);
+                    }
+
+                    object_value = *target.stack_slot;
+                }
+                else
+                {
+                    result = load_field_from_resolved_byref_payload(frame, &target, token, &field_value);
+                    if (result.status == ZACLR_STATUS_OK)
+                    {
+                        frame->il_offset += 5u;
+                        return zaclr_eval_stack_push(&frame->eval_stack, &field_value);
+                    }
+                }
+                /*
                 ZACLR_TRACE_VALUE(context->runtime,
                                   ZACLR_TRACE_CATEGORY_EXEC,
                                   ZACLR_TRACE_EVENT_CALL_TARGET,
                                   "Ldfld.ResolvedLocalKind",
                                   (uint64_t)object_value.kind);
+                */
             }
 
-            result = stack_value_to_object_handle(&object_value, &handle);
+            result = stack_value_to_object_reference(frame->runtime, &object_value, &object);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
@@ -3161,16 +4306,16 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 && frame->method->name.text != NULL
                 && text_equals(frame->method->name.text, "get_Length"))
             {
-                zaclr_object_handle string_handle = handle;
+                const struct zaclr_object_desc* string_object_ref = object;
                 if (frame->argument_count != 0u
                     && frame->arguments != NULL
-                    && frame->arguments[0].kind == ZACLR_STACK_VALUE_OBJECT_HANDLE
-                    && frame->arguments[0].data.object_handle != 0u)
+                    && frame->arguments[0].kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE
+                    && frame->arguments[0].data.object_reference != NULL)
                 {
-                    string_handle = frame->arguments[0].data.object_handle;
+                    string_object_ref = frame->arguments[0].data.object_reference;
                 }
 
-                const struct zaclr_string_desc* string_object = zaclr_string_from_handle_const(&frame->runtime->heap, string_handle);
+                const struct zaclr_string_desc* string_object = (const struct zaclr_string_desc*)string_object_ref;
                 if (string_object != NULL)
                 {
                     frame->il_offset += 5u;
@@ -3201,10 +4346,39 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 token = zaclr_token_make(((uint32_t)ZACLR_TOKEN_TABLE_FIELD << 24) | target_field_row);
             }
 
+            if (frame->method != NULL
+                && frame->method->name.text != NULL
+                && text_equals(frame->method->name.text, "GetTypeFromHandle"))
+            {
+                console_write("[ZACLR][ldfld] normal path object_ptr=");
+                console_write_hex64((uint64_t)(uintptr_t)object);
+                console_write(" token=");
+                console_write_hex64((uint64_t)token.raw);
+                console_write(" kind=");
+                console_write_hex64((uint64_t)object_value.kind);
+                console_write(" flags=");
+                console_write_hex64((uint64_t)(object != NULL ? zaclr_object_flags(object) : 0u));
+                console_write(" family=");
+                console_write_hex64((uint64_t)(object != NULL ? zaclr_object_family(object) : 0u));
+                console_write(" type_id=");
+                console_write_hex64((uint64_t)(object != NULL ? zaclr_object_type_id(object) : 0u));
+                console_write("\n");
+            }
+
             frame->il_offset += 5u;
-            result = load_object_field(frame->runtime, handle, token, &field_value);
+            result = load_object_field(frame->runtime, object, token, &field_value);
             if (result.status != ZACLR_STATUS_OK)
             {
+                if (frame->method != NULL
+                    && frame->method->name.text != NULL
+                    && text_equals(frame->method->name.text, "GetTypeFromHandle"))
+                {
+                    console_write("[ZACLR][ldfld] normal path status=");
+                    console_write_hex64((uint64_t)result.status);
+                    console_write(" category=");
+                    console_write_hex64((uint64_t)result.category);
+                    console_write("\n");
+                }
                 return result;
             }
 
@@ -3224,7 +4398,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
-            if (object_value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+            if (object_value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS || object_value.kind == ZACLR_STACK_VALUE_BYREF)
             {
                 struct zaclr_stack_value* target = resolve_local_address_target(frame, &object_value);
                 if (target == NULL)
@@ -3235,7 +4409,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 object_value = *target;
             }
 
-            result = stack_value_to_object_handle(&object_value, &handle);
+            result = stack_value_to_object_handle(frame->runtime, &object_value, &handle);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
@@ -3265,11 +4439,29 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             {
-                struct zaclr_reference_object_desc* object = zaclr_reference_object_from_handle(&frame->runtime->heap, handle);
+                struct zaclr_object_desc* raw_object = zaclr_heap_get_object(&frame->runtime->heap, handle);
+                struct zaclr_reference_object_desc* object = (struct zaclr_reference_object_desc*)raw_object;
                 struct zaclr_stack_value* field_storage;
-                if (object == NULL)
+                if (raw_object == NULL)
                 {
                     return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+                }
+
+                if ((zaclr_object_flags(raw_object) & ZACLR_OBJECT_FLAG_STRING) != 0u)
+                {
+                    const struct zaclr_string_desc* string_object = (const struct zaclr_string_desc*)raw_object;
+                    struct zaclr_stack_value address_value = {};
+                    result = zaclr_stack_value_set_byref(&address_value,
+                                                         (void*)zaclr_string_chars(string_object),
+                                                         sizeof(uint16_t),
+                                                         0u,
+                                                         ZACLR_STACK_VALUE_FLAG_NONE);
+                    if (result.status != ZACLR_STATUS_OK)
+                    {
+                        return result;
+                    }
+                    frame->il_offset += 5u;
+                    return zaclr_eval_stack_push(&frame->eval_stack, &address_value);
                 }
 
                 field_storage = zaclr_reference_object_field_storage(object, token);
@@ -3281,10 +4473,182 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 frame->il_offset += 5u;
                 {
                     struct zaclr_stack_value address_value = {};
-                    address_value.kind = ZACLR_STACK_VALUE_LOCAL_ADDRESS;
-                    address_value.data.raw = (uintptr_t)field_storage;
+                    result = zaclr_stack_value_set_byref(&address_value,
+                                                         field_storage,
+                                                         sizeof(struct zaclr_stack_value),
+                                                         token.raw,
+                                                         ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT);
+                    if (result.status != ZACLR_STATUS_OK)
+                    {
+                        return result;
+                    }
                     return zaclr_eval_stack_push(&frame->eval_stack, &address_value);
                 }
+            }
+        }
+
+        case CEE_LDOBJ:
+        {
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 2u));
+            struct zaclr_stack_value address_value = {};
+            struct zaclr_resolved_byref target = {};
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &address_value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = resolve_byref_target(frame, &address_value, &target);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            frame->il_offset += 6u;
+            if (target.stack_slot != NULL)
+            {
+                return zaclr_eval_stack_push(&frame->eval_stack, target.stack_slot);
+            }
+
+            if (target.payload_size == sizeof(zaclr_object_handle))
+            {
+                zaclr_object_handle handle = 0u;
+                kernel_memcpy(&handle, target.address, sizeof(handle));
+                return push_object_handle(frame, handle);
+            }
+
+            if (target.payload_size <= 4u)
+            {
+                uint32_t value_i4 = 0u;
+                kernel_memcpy(&value_i4, target.address, target.payload_size);
+                return push_i4(frame, (int32_t)value_i4);
+            }
+
+            if (target.payload_size == 8u)
+            {
+                uint64_t value_i8 = 0u;
+                kernel_memcpy(&value_i8, target.address, sizeof(value_i8));
+                return push_i8(frame, (int64_t)value_i8);
+            }
+
+            {
+                struct zaclr_stack_value value = {};
+                result = zaclr_stack_value_set_valuetype(&value, token.raw, target.address, target.payload_size);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+
+                result = zaclr_eval_stack_push(&frame->eval_stack, &value);
+                zaclr_stack_value_reset(&value);
+                return result;
+            }
+        }
+
+        case CEE_LDSFLDA:
+        {
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 2u));
+            uint32_t field_row = zaclr_token_row(&token);
+            struct zaclr_stack_value address_value = {};
+
+            if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+            {
+                console_write("[ZACLR][exec] Type.cctor ldsflda token=");
+                console_write_hex64((uint64_t)token.raw);
+                console_write(" depth_before=");
+                console_write_dec((uint64_t)frame->eval_stack.depth);
+                console_write("\n");
+            }
+
+            if (!zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD)
+                || field_row == 0u
+                || field_row > frame->assembly->static_field_count
+                || frame->assembly->static_fields == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            frame->il_offset += 6u;
+            {
+                struct zaclr_result result = zaclr_stack_value_set_byref(&address_value,
+                                                                         &frame->assembly->static_fields[field_row - 1u],
+                                                                         sizeof(struct zaclr_stack_value),
+                                                                         token.raw,
+                                                                         ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+            }
+
+            {
+                struct zaclr_result push_result = zaclr_eval_stack_push(&frame->eval_stack, &address_value);
+                if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+                {
+                    console_write("[ZACLR][exec] Type.cctor ldsflda push_status=");
+                    console_write_dec((uint64_t)push_result.status);
+                    console_write(" depth_after=");
+                    console_write_dec((uint64_t)frame->eval_stack.depth);
+                    console_write("\n");
+                }
+
+                return push_result;
+            }
+        }
+
+        case CEE_LDELEMA:
+        {
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 2u));
+            struct zaclr_stack_value index_value = {};
+            struct zaclr_stack_value array_value = {};
+            struct zaclr_array_desc* array;
+            struct zaclr_object_desc* array_object;
+            uint32_t index = 0u;
+            struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &index_value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = zaclr_eval_stack_pop(&frame->eval_stack, &array_value);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = stack_value_to_u32(&index_value, &index);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = stack_value_to_object_reference(frame->runtime, &array_value, &array_object);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            array = (struct zaclr_array_desc*)array_object;
+            if (array == NULL || index >= zaclr_array_length(array))
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            frame->il_offset += 6u;
+            {
+                struct zaclr_stack_value address_value = {};
+                uint8_t* address = (uint8_t*)zaclr_array_data(array) + ((size_t)index * zaclr_array_element_size(array));
+                result = zaclr_stack_value_set_byref(&address_value,
+                                                     address,
+                                                     zaclr_array_element_size(array),
+                                                     token.raw != 0u ? token.raw : zaclr_array_element_type(array).raw,
+                                                     ZACLR_STACK_VALUE_FLAG_NONE);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+
+                return zaclr_eval_stack_push(&frame->eval_stack, &address_value);
             }
         }
 
@@ -3314,6 +4678,16 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         case CEE_LDLOCA_S:
         {
             uint32_t local_index = frame->il_start[frame->il_offset + 1u];
+            if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+            {
+                console_write("[ZACLR][exec] Type.cctor ldloca.s local=");
+                console_write_dec((uint64_t)local_index);
+                console_write(" depth_before=");
+                console_write_dec((uint64_t)frame->eval_stack.depth);
+                console_write(" il_offset=");
+                console_write_dec((uint64_t)frame->il_offset);
+                console_write("\n");
+            }
             frame->il_offset += 2u;
             return push_local_address(frame, local_index);
         }
@@ -3415,6 +4789,162 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 #endif
         }
 
+        case CEE_LDTOKEN:
+        {
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
+            const struct zaclr_loaded_assembly* target_assembly = NULL;
+            const struct zaclr_type_desc* target_type = NULL;
+            struct zaclr_result result;
+            zaclr_object_handle runtime_type_handle;
+            struct zaclr_runtime_type_desc* runtime_type;
+            uint32_t type_row;
+            frame->il_offset += 5u;
+
+            if (frame->method != NULL
+                && frame->method->name.text != NULL
+                && zaclr_text_equals(frame->method->name.text, "TypeHandleOf")
+                && frame->generic_context.method_arg_count > 0u)
+            {
+                const struct zaclr_generic_argument* method_arg = &frame->generic_context.method_args[0];
+                const struct zaclr_loaded_assembly* generic_assembly = method_arg->assembly != NULL ? method_arg->assembly : frame->assembly;
+                const struct zaclr_type_desc* runtime_type_handle_type;
+                struct zaclr_member_name_ref runtime_type_handle_name = { "System", "RuntimeTypeHandle", NULL };
+                struct zaclr_stack_value runtime_type_handle_value = {};
+                if (generic_assembly != NULL
+                    && zaclr_token_matches_table(&method_arg->token, ZACLR_TOKEN_TABLE_TYPEDEF)
+                    && generic_assembly->runtime_type_cache != NULL)
+                {
+                    uint32_t generic_type_row = zaclr_token_row(&method_arg->token);
+                    if (generic_type_row != 0u && generic_type_row <= generic_assembly->runtime_type_cache_count)
+                    {
+                        runtime_type_handle = generic_assembly->runtime_type_cache[generic_type_row - 1u];
+                    }
+                }
+
+                if (runtime_type_handle == 0u)
+                {
+                    result = zaclr_runtime_type_allocate_handle(&frame->runtime->heap,
+                                                               generic_assembly,
+                                                               method_arg->token,
+                                                               &runtime_type_handle);
+                    if (result.status != ZACLR_STATUS_OK)
+                    {
+                        return result;
+                    }
+
+                    if (generic_assembly != NULL
+                        && zaclr_token_matches_table(&method_arg->token, ZACLR_TOKEN_TABLE_TYPEDEF)
+                        && generic_assembly->runtime_type_cache != NULL)
+                    {
+                        uint32_t generic_type_row = zaclr_token_row(&method_arg->token);
+                        if (generic_type_row != 0u && generic_type_row <= generic_assembly->runtime_type_cache_count)
+                        {
+                            ((struct zaclr_loaded_assembly*)generic_assembly)->runtime_type_cache[generic_type_row - 1u] = runtime_type_handle;
+                        }
+                    }
+                }
+
+                runtime_type_handle_type = zaclr_type_system_find_type_by_name(frame->assembly, &runtime_type_handle_name);
+                if (runtime_type_handle_type == NULL)
+                {
+                    return push_object_handle(frame, runtime_type_handle);
+                }
+
+                result = zaclr_stack_value_set_valuetype(&runtime_type_handle_value,
+                                                        runtime_type_handle_type->token.raw,
+                                                        &runtime_type_handle,
+                                                        sizeof(runtime_type_handle));
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+
+                return zaclr_eval_stack_push(&frame->eval_stack, &runtime_type_handle_value);
+            }
+
+            result = resolve_type_desc(frame->assembly, frame->runtime, token, &target_assembly, &target_type);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            if (target_assembly == NULL || target_type == NULL || !zaclr_token_matches_table(&target_type->token, ZACLR_TOKEN_TABLE_TYPEDEF))
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            type_row = zaclr_token_row(&target_type->token);
+            if (type_row == 0u || type_row > target_assembly->runtime_type_cache_count || target_assembly->runtime_type_cache == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            runtime_type_handle = target_assembly->runtime_type_cache[type_row - 1u];
+            if (runtime_type_handle == 0u)
+            {
+                result = zaclr_runtime_type_allocate(&frame->runtime->heap,
+                                                    target_assembly,
+                                                    target_type->token,
+                                                    &runtime_type);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+
+                runtime_type_handle = zaclr_heap_get_object_handle(&frame->runtime->heap, &runtime_type->object);
+                ((struct zaclr_loaded_assembly*)target_assembly)->runtime_type_cache[type_row - 1u] = runtime_type_handle;
+            }
+
+            return push_object_handle(frame, runtime_type_handle);
+        }
+
+        case CEE_LDFTN:
+        {
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 2u));
+            const struct zaclr_method_desc* target_method = NULL;
+            struct zaclr_result result = zaclr_result_ok();
+
+            frame->il_offset += 6u;
+
+            if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_METHOD))
+            {
+                target_method = zaclr_method_map_find_by_token(&frame->assembly->method_map, token);
+                if (target_method == NULL)
+                {
+                    return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+                }
+            }
+            else if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_MEMBERREF))
+            {
+                struct zaclr_memberref_target memberref = {};
+                const struct zaclr_loaded_assembly* target_assembly = NULL;
+                const struct zaclr_type_desc* target_type = NULL;
+                result = zaclr_metadata_get_memberref_info(frame->assembly, token, &memberref);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+
+                result = zaclr_member_resolution_resolve_method(frame->runtime,
+                                                               frame->assembly,
+                                                               &memberref,
+                                                               &target_assembly,
+                                                               &target_type,
+                                                               &target_method);
+                (void)target_type;
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+            }
+            else
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            return push_i8(frame, (int64_t)(uintptr_t)target_method);
+        }
+
         case CEE_DUP:
         {
             struct zaclr_stack_value value;
@@ -3442,7 +4972,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             uint32_t length;
             struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
             uint32_t element_size;
-            zaclr_object_handle array_handle;
+            struct zaclr_array_desc* array;
 
             result = zaclr_eval_stack_pop(&frame->eval_stack, &count_value);
             if (result.status != ZACLR_STATUS_OK)
@@ -3462,34 +4992,34 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                           token,
                                           element_size,
                                           length,
-                                          &array_handle);
+                                          &array);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
             frame->il_offset += 5u;
-            return push_object_handle(frame, array_handle);
+            return push_object_handle(frame, zaclr_heap_get_object_handle(&frame->runtime->heap, &array->object));
         }
 
         case CEE_LDLEN:
         {
             struct zaclr_stack_value array_value;
             struct zaclr_array_desc* array;
-            zaclr_object_handle array_handle;
+            struct zaclr_object_desc* array_object;
             struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &array_value);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
-            result = stack_value_to_object_handle(&array_value, &array_handle);
+            result = stack_value_to_object_reference(frame->runtime, &array_value, &array_object);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
-            array = zaclr_array_from_handle(&frame->runtime->heap, array_handle);
+            array = (struct zaclr_array_desc*)array_object;
             if (array == NULL)
             {
                 return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
@@ -3517,7 +5047,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             struct zaclr_array_desc* array;
             struct zaclr_result result;
             uint32_t index;
-            zaclr_object_handle array_handle;
+            struct zaclr_object_desc* array_object;
 
             result = zaclr_eval_stack_pop(&frame->eval_stack, &index_value);
             if (result.status != ZACLR_STATUS_OK)
@@ -3537,13 +5067,13 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
-            result = stack_value_to_object_handle(&array_value, &array_handle);
+            result = stack_value_to_object_reference(frame->runtime, &array_value, &array_object);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
-            array = zaclr_array_from_handle(&frame->runtime->heap, array_handle);
+            array = (struct zaclr_array_desc*)array_object;
             if (array == NULL)
             {
                 return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
@@ -3569,7 +5099,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             struct zaclr_array_desc* array;
             struct zaclr_result result;
             uint32_t index;
-            zaclr_object_handle array_handle;
+            struct zaclr_object_desc* array_object;
 
             result = zaclr_eval_stack_pop(&frame->eval_stack, &element_value);
             if (result.status != ZACLR_STATUS_OK)
@@ -3595,20 +5125,20 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
-            result = stack_value_to_object_handle(&array_value, &array_handle);
+            result = stack_value_to_object_reference(frame->runtime, &array_value, &array_object);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
-            array = zaclr_array_from_handle(&frame->runtime->heap, array_handle);
+            array = (struct zaclr_array_desc*)array_object;
             if (array == NULL)
             {
                 return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
             }
 
             frame->il_offset += opcode == CEE_STELEM ? 5u : 1u;
-            return write_array_indexed_value(array, index, opcode, &element_value);
+            return write_array_indexed_value(frame->runtime, array, index, opcode, &element_value);
         }
 
         case CEE_BR_S:
@@ -3646,9 +5176,9 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             {
                 branch = (value.data.i8 != 0);
             }
-            else if (value.kind == ZACLR_STACK_VALUE_OBJECT_HANDLE)
+            else if (value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
             {
-                branch = (value.data.object_handle != 0u);
+                branch = (value.data.object_reference != NULL);
             }
             else
             {
@@ -3687,9 +5217,9 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             {
                 branch = (value.data.i8 != 0);
             }
-            else if (value.kind == ZACLR_STACK_VALUE_OBJECT_HANDLE)
+            else if (value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
             {
-                branch = (value.data.object_handle != 0u);
+                branch = (value.data.object_reference != NULL);
             }
             else
             {
@@ -4226,12 +5756,10 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 }
             }
             else if (parent != NULL
-                     && frame->method != NULL
-                     && frame->method->name.text != NULL
-                     && text_equals(frame->method->name.text, ".ctor")
+                     && (frame->flags & k_zaclr_frame_flag_newobj_ctor) != 0u
                      && frame->argument_count != 0u
                      && frame->arguments != NULL
-                     && frame->arguments[0].kind == ZACLR_STACK_VALUE_OBJECT_HANDLE)
+                     && frame->arguments[0].kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
             {
                 struct zaclr_result result = zaclr_eval_stack_push(&parent->eval_stack, &frame->arguments[0]);
                 if (result.status != ZACLR_STATUS_OK)

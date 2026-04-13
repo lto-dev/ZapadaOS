@@ -14,10 +14,10 @@ using System;
 
 namespace Zapada.Test.Hello
 {
-    internal static class Hello
+    public static class Hello
     {
         /* Phase 3B boot scaffolding — replaced by managed VFS in Phase 3.1 */
-        internal static void Run()
+        public static void Run()
         {
             Console.Write("[Boot] Zapada.Test.Hello loaded\n");
             Console.Write("[Gate] Phase3B\n");

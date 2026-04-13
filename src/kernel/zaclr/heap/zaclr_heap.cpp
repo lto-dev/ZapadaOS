@@ -8,25 +8,25 @@ namespace
 {
     static const uint32_t ZACLR_HEAP_DEFAULT_THRESHOLD_BYTES = 64u * 1024u;
 
-    static void zaclr_heap_release_slot(struct zaclr_heap* heap, uint32_t index)
+    static void zaclr_heap_release_node(struct zaclr_heap* heap, uint32_t index)
     {
-        struct zaclr_heap_slot* slot;
+        struct zaclr_heap_object_node* node;
 
-        if (heap == NULL || index >= heap->slot_count)
+        if (heap == NULL || index >= heap->node_count)
         {
             return;
         }
 
-        slot = &heap->slots[index];
-        if (slot->used == 0u || slot->object == NULL)
+        node = &heap->nodes[index];
+        if (node->used == 0u || node->object == NULL)
         {
-            *slot = {};
+            *node = {};
             return;
         }
 
-        if (heap->allocated_bytes >= slot->allocation_size)
+        if (heap->allocated_bytes >= node->allocation_size)
         {
-            heap->allocated_bytes -= slot->allocation_size;
+            heap->allocated_bytes -= node->allocation_size;
         }
         else
         {
@@ -38,13 +38,13 @@ namespace
             heap->live_object_count--;
         }
 
-        kernel_free(slot->object);
-        *slot = {};
+        kernel_free(node->object);
+        *node = {};
     }
 
-    static struct zaclr_result zaclr_heap_reserve_slots(struct zaclr_heap* heap, uint32_t minimum_capacity)
+    static struct zaclr_result zaclr_heap_reserve_nodes(struct zaclr_heap* heap, uint32_t minimum_capacity)
     {
-        struct zaclr_heap_slot* slots;
+        struct zaclr_heap_object_node* nodes;
         uint32_t new_capacity;
         uint32_t index;
 
@@ -53,12 +53,12 @@ namespace
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
         }
 
-        if (minimum_capacity <= heap->slot_capacity)
+        if (minimum_capacity <= heap->node_capacity)
         {
             return zaclr_result_ok();
         }
 
-        new_capacity = heap->slot_capacity == 0u ? 16u : heap->slot_capacity;
+        new_capacity = heap->node_capacity == 0u ? 16u : heap->node_capacity;
         while (new_capacity < minimum_capacity)
         {
             if (new_capacity > (0xFFFFFFFFu / 2u))
@@ -69,25 +69,25 @@ namespace
             new_capacity *= 2u;
         }
 
-        slots = (struct zaclr_heap_slot*)kernel_alloc(sizeof(struct zaclr_heap_slot) * new_capacity);
-        if (slots == NULL)
+        nodes = (struct zaclr_heap_object_node*)kernel_alloc(sizeof(struct zaclr_heap_object_node) * new_capacity);
+        if (nodes == NULL)
         {
             return zaclr_result_make(ZACLR_STATUS_OUT_OF_MEMORY, ZACLR_STATUS_CATEGORY_HEAP);
         }
 
-        kernel_memset(slots, 0, sizeof(struct zaclr_heap_slot) * new_capacity);
-        for (index = 0u; index < heap->slot_count; ++index)
+        kernel_memset(nodes, 0, sizeof(struct zaclr_heap_object_node) * new_capacity);
+        for (index = 0u; index < heap->node_count; ++index)
         {
-            slots[index] = heap->slots[index];
+            nodes[index] = heap->nodes[index];
         }
 
-        if (heap->slots != NULL)
+        if (heap->nodes != NULL)
         {
-            kernel_free(heap->slots);
+            kernel_free(heap->nodes);
         }
 
-        heap->slots = slots;
-        heap->slot_capacity = new_capacity;
+        heap->nodes = nodes;
+        heap->node_capacity = new_capacity;
         return zaclr_result_ok();
     }
 }
@@ -102,7 +102,6 @@ extern "C" struct zaclr_result zaclr_heap_initialize(struct zaclr_heap* heap,
 
     *heap = {};
     heap->runtime = runtime;
-    heap->next_handle = 1u;
     heap->collection_threshold_bytes = ZACLR_HEAP_DEFAULT_THRESHOLD_BYTES;
     return zaclr_result_ok();
 }
@@ -116,14 +115,14 @@ extern "C" void zaclr_heap_reset(struct zaclr_heap* heap)
         return;
     }
 
-    for (index = 0u; index < heap->slot_count; ++index)
+    for (index = 0u; index < heap->node_count; ++index)
     {
-        zaclr_heap_release_slot(heap, index);
+        zaclr_heap_release_node(heap, index);
     }
 
-    if (heap->slots != NULL)
+    if (heap->nodes != NULL)
     {
-        kernel_free(heap->slots);
+        kernel_free(heap->nodes);
     }
 
     *heap = {};
@@ -139,7 +138,7 @@ extern "C" struct zaclr_result zaclr_heap_allocate_object(struct zaclr_heap* hea
 {
     struct zaclr_object_desc* object;
     struct zaclr_result result;
-    uint32_t slot_index;
+    uint32_t node_index;
 
     if (heap == NULL || out_object == NULL || allocation_size < sizeof(struct zaclr_object_desc))
     {
@@ -159,7 +158,7 @@ extern "C" struct zaclr_result zaclr_heap_allocate_object(struct zaclr_heap* hea
         }
     }
 
-    result = zaclr_heap_reserve_slots(heap, heap->slot_count + 1u);
+    result = zaclr_heap_reserve_nodes(heap, heap->node_count + 1u);
     if (result.status != ZACLR_STATUS_OK)
     {
         return result;
@@ -186,20 +185,20 @@ extern "C" struct zaclr_result zaclr_heap_allocate_object(struct zaclr_heap* hea
     }
 
     kernel_memset(object, 0, allocation_size);
-    object->handle = heap->next_handle++;
-    object->type_id = type_id;
-    object->owning_assembly = owning_assembly;
     object->size_bytes = (uint32_t)allocation_size;
-    object->flags = object_flags;
     object->family = (uint16_t)object_family;
     object->gc_mark = 0u;
     object->gc_state = ZACLR_OBJECT_GC_STATE_NONE;
-    slot_index = heap->slot_count;
-    heap->slots[slot_index].handle = object->handle;
-    heap->slots[slot_index].object = object;
-    heap->slots[slot_index].allocation_size = (uint32_t)allocation_size;
-    heap->slots[slot_index].used = 1u;
-    heap->slot_count++;
+    object->header.sync_block_index = 0u;
+    object->header.flags = object_flags;
+    object->header.method_table = NULL;
+    object->owning_assembly = owning_assembly;
+    object->type_id = type_id;
+    node_index = heap->node_count;
+    heap->nodes[node_index].object = object;
+    heap->nodes[node_index].allocation_size = (uint32_t)allocation_size;
+    heap->nodes[node_index].used = 1u;
+    heap->node_count++;
     heap->live_object_count++;
     heap->allocated_bytes += (uint32_t)allocation_size;
     *out_object = object;
@@ -207,24 +206,21 @@ extern "C" struct zaclr_result zaclr_heap_allocate_object(struct zaclr_heap* hea
 }
 
 extern "C" struct zaclr_object_desc* zaclr_heap_get_object(const struct zaclr_heap* heap,
-                                                              zaclr_object_handle handle)
+                                                               zaclr_object_handle handle)
 {
-    uint32_t index;
-
-    if (heap == NULL || handle == 0u)
+    (void)heap;
+    if (handle == 0u)
     {
         return NULL;
     }
 
-    for (index = 0u; index < heap->slot_count; ++index)
-    {
-        if (heap->slots[index].used != 0u && heap->slots[index].handle == handle)
-        {
-            return heap->slots[index].object;
-        }
-    }
+    return (struct zaclr_object_desc*)(uintptr_t)handle;
+}
 
-    return NULL;
+extern "C" zaclr_object_handle zaclr_heap_get_object_handle(const struct zaclr_heap*,
+                                                               const struct zaclr_object_desc* object)
+{
+    return (zaclr_object_handle)(uintptr_t)object;
 }
 
 extern "C" uint32_t zaclr_heap_live_object_count(const struct zaclr_heap* heap)
@@ -246,11 +242,11 @@ extern "C" void zaclr_heap_clear_marks(struct zaclr_heap* heap)
         return;
     }
 
-    for (index = 0u; index < heap->slot_count; ++index)
+    for (index = 0u; index < heap->node_count; ++index)
     {
-        if (heap->slots[index].used != 0u && heap->slots[index].object != NULL)
+        if (heap->nodes[index].used != 0u && heap->nodes[index].object != NULL)
         {
-            heap->slots[index].object->gc_mark = 0u;
+            heap->nodes[index].object->gc_mark = 0u;
         }
     }
 }
@@ -264,17 +260,17 @@ extern "C" void zaclr_heap_sweep_unmarked(struct zaclr_heap* heap)
         return;
     }
 
-    for (index = 0u; index < heap->slot_count; ++index)
+    for (index = 0u; index < heap->node_count; ++index)
     {
-        struct zaclr_object_desc* object = heap->slots[index].object;
-        if (heap->slots[index].used == 0u || object == NULL)
+        struct zaclr_object_desc* object = heap->nodes[index].object;
+        if (heap->nodes[index].used == 0u || object == NULL)
         {
             continue;
         }
 
         if (object->gc_mark == 0u && (object->gc_state & ZACLR_OBJECT_GC_STATE_PINNED) == 0u)
         {
-            zaclr_heap_release_slot(heap, index);
+            zaclr_heap_release_node(heap, index);
         }
     }
 

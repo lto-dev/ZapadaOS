@@ -28,11 +28,22 @@ def parse_sig_type(text: str, primitive_map: dict[str, str], index: int = 0):
             flags.append('ZACLR_NATIVE_BIND_SIG_FLAG_BYREF')
             index += len('BYREF_')
             continue
+        if text.startswith('BYREF', index) and index + len('BYREF') == len(text):
+            flags.append('ZACLR_NATIVE_BIND_SIG_FLAG_BYREF')
+            index += len('BYREF')
+            continue
         if text.startswith('PINNED_', index):
             flags.append('ZACLR_NATIVE_BIND_SIG_FLAG_PINNED')
             index += len('PINNED_')
             continue
+        if text.startswith('PINNED', index) and index + len('PINNED') == len(text):
+            flags.append('ZACLR_NATIVE_BIND_SIG_FLAG_PINNED')
+            index += len('PINNED')
+            continue
         break
+
+    if index == len(text):
+        return ({'kind': 'VOID', 'flags': flags, 'opaque': True}, index)
 
     for prefix, kind in [('SZARRAY_', 'SZARRAY'), ('PTR_', 'PTR')]:
         if text.startswith(prefix, index):
@@ -73,10 +84,14 @@ def parse_sig_type(text: str, primitive_map: dict[str, str], index: int = 0):
             args.append(arg)
         return ({'kind': 'GENERICINST', 'flags': flags, 'type_namespace': namespace, 'type_name': name, 'generic_args': args, 'owner_kind': owner_kind}, index)
 
-    for prefix, kind in [('CLASS_', 'CLASS'), ('VALUETYPE_', 'VALUETYPE')]:
-        if text.startswith(prefix, index):
-            namespace, name, index = parse_named_type(text, index + len(prefix))
-            return ({'kind': kind, 'flags': flags, 'type_namespace': namespace, 'type_name': name}, index)
+    for token, kind in [('CLASS', 'CLASS'), ('VALUETYPE', 'VALUETYPE')]:
+        if text.startswith(token, index):
+            next_index = index + len(token)
+            if next_index == len(text):
+                return ({'kind': kind, 'flags': flags, 'type_namespace': '', 'type_name': None}, next_index)
+            if text.startswith('_', next_index):
+                namespace, name, index = parse_named_type(text, next_index + 1)
+                return ({'kind': kind, 'flags': flags, 'type_namespace': namespace, 'type_name': name}, index)
 
     for key in sorted(primitive_map.keys(), key=len, reverse=True):
         if text.startswith(key, index):
@@ -112,11 +127,11 @@ def emit_sig_type(spec: dict, name_hint: str, primitive_map: dict[str, str]):
     if spec['kind'] == 'CLASS':
         element_type = 'ZACLR_ELEMENT_TYPE_CLASS'
         type_namespace = f'"{spec["type_namespace"]}"' if spec['type_namespace'] else 'nullptr'
-        type_name = f'"{spec["type_name"]}"'
+        type_name = f'"{spec["type_name"]}"' if spec.get('type_name') else 'nullptr'
     elif spec['kind'] == 'VALUETYPE':
         element_type = 'ZACLR_ELEMENT_TYPE_VALUETYPE'
         type_namespace = f'"{spec["type_namespace"]}"' if spec['type_namespace'] else 'nullptr'
-        type_name = f'"{spec["type_name"]}"'
+        type_name = f'"{spec["type_name"]}"' if spec.get('type_name') else 'nullptr'
     elif spec['kind'] == 'SZARRAY':
         element_type = 'ZACLR_ELEMENT_TYPE_SZARRAY'
     elif spec['kind'] == 'PTR':
@@ -191,6 +206,9 @@ def main() -> int:
             has_this = 1
             if signature_parts and signature_parts[0] == 'STATIC':
                 has_this = 0
+                signature_parts = signature_parts[1:]
+            elif signature_parts and signature_parts[0] == 'INSTANCE':
+                has_this = 1
                 signature_parts = signature_parts[1:]
             return_spec, consumed = parse_sig_type(signature_parts[0], primitive_map, 0)
             if consumed != len(signature_parts[0]):
