@@ -129,3 +129,46 @@ struct zaclr_result zaclr_native_System_RuntimeTypeHandle::FromIntPtr___STATIC__
 
     return zaclr_native_call_frame_set_object(&frame, runtime_type_handle);
 }
+
+/* CoreCLR: RuntimeTypeHandle.GetAssemblyIfExists(RuntimeType type) -> RuntimeAssembly?
+   FCALL (InternalCall), static, takes RuntimeType object, returns RuntimeAssembly or null.
+   Reference: CLONES/runtime/src/coreclr/vm/runtimehandles.cpp:220-231
+   
+   In CoreCLR this extracts the MethodTable from the RuntimeType, gets the
+   Assembly* from the MethodTable's Module, then returns the Assembly's
+   managed "exposed object" (RuntimeAssembly) if it has already been created.
+   
+   In ZACLR, the RuntimeType stores its type_assembly directly.  We lazily
+   create the managed RuntimeAssembly via zaclr_runtime_assembly_get_or_create. */
+struct zaclr_result zaclr_native_System_RuntimeTypeHandle::GetAssemblyIfExists___STATIC__CLASS_System_Reflection_RuntimeAssembly__CLASS_System_RuntimeType(struct zaclr_native_call_frame& frame)
+{
+    zaclr_object_handle type_handle = 0u;
+    const struct zaclr_runtime_type_desc* runtime_type = NULL;
+    zaclr_object_handle assembly_handle = 0u;
+    struct zaclr_result result;
+
+    /* Argument 0: RuntimeType type */
+    result = load_runtime_type_handle_argument(frame, 0u, &runtime_type, &type_handle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (runtime_type == NULL || runtime_type->type_assembly == NULL)
+    {
+        /* No type or no assembly -> return null (caller falls back to GetAssemblySlow) */
+        return zaclr_native_call_frame_set_object(&frame, 0u);
+    }
+
+    /* Get or create the managed RuntimeAssembly for this assembly */
+    result = zaclr_runtime_assembly_get_or_create(&frame.runtime->heap,
+                                                   (struct zaclr_loaded_assembly*)runtime_type->type_assembly,
+                                                   &assembly_handle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        /* If allocation fails, return null to let caller try the slow path */
+        return zaclr_native_call_frame_set_object(&frame, 0u);
+    }
+
+    return zaclr_native_call_frame_set_object(&frame, assembly_handle);
+}

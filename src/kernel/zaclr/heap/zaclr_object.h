@@ -127,6 +127,12 @@ const struct zaclr_runtime_type_desc* zaclr_runtime_type_from_handle_const(const
 struct zaclr_result zaclr_runtime_type_find_by_native_handle(struct zaclr_runtime* runtime,
                                                              uintptr_t native_handle,
                                                              zaclr_object_handle* out_handle);
+/* Allocate or retrieve the cached managed RuntimeAssembly object for
+   the given loaded assembly.  Mirrors CoreCLR's Assembly::GetExposedObject().
+   The handle is cached in loaded_assembly->exposed_assembly_handle. */
+struct zaclr_result zaclr_runtime_assembly_get_or_create(struct zaclr_heap* heap,
+                                                         struct zaclr_loaded_assembly* assembly,
+                                                         zaclr_object_handle* out_handle);
 struct zaclr_result zaclr_reference_object_store_field(struct zaclr_reference_object_desc* object,
                                                        struct zaclr_token token,
                                                        const struct zaclr_stack_value* value);

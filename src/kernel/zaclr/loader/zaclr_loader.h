@@ -28,6 +28,10 @@ struct zaclr_loaded_assembly {
     struct zaclr_name_view assembly_name;
     struct zaclr_token entry_point_token;
     uint32_t flags;
+    /* Cached managed RuntimeAssembly object handle.  Mirrors CoreCLR's
+       Assembly::m_ExposedObject pattern (see vm/assembly.hpp).
+       0 = not yet created. */
+    zaclr_object_handle exposed_assembly_handle;
 };
 
 struct zaclr_loader {

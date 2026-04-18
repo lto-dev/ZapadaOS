@@ -799,6 +799,117 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate_handle(struct zaclr_h
     return zaclr_result_ok();
 }
 
+extern "C" struct zaclr_result zaclr_runtime_assembly_get_or_create(struct zaclr_heap* heap,
+                                                                     struct zaclr_loaded_assembly* assembly,
+                                                                     zaclr_object_handle* out_handle)
+{
+    struct zaclr_result result;
+    struct zaclr_reference_object_desc* object;
+    struct zaclr_method_table* method_table = NULL;
+    const struct zaclr_type_desc* runtime_assembly_desc = NULL;
+    const struct zaclr_loaded_assembly* corelib = NULL;
+    zaclr_type_id assembly_type_id = 0u;
+
+    if (heap == NULL || assembly == NULL || out_handle == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    /* Return cached handle if already created */
+    if (assembly->exposed_assembly_handle != 0u)
+    {
+        *out_handle = assembly->exposed_assembly_handle;
+        return zaclr_result_ok();
+    }
+
+    /* Find System.Reflection.RuntimeAssembly type in CoreLib */
+    if (heap->runtime != NULL)
+    {
+        const struct zaclr_app_domain* domain = zaclr_runtime_current_domain(heap->runtime);
+        if (domain != NULL)
+        {
+            corelib = zaclr_assembly_registry_find_by_name(&domain->registry, "System.Private.CoreLib");
+        }
+        if (corelib != NULL)
+        {
+            struct zaclr_member_name_ref type_name = {"System.Reflection", "RuntimeAssembly", NULL};
+            runtime_assembly_desc = zaclr_type_system_find_type_by_name(corelib, &type_name);
+            if (runtime_assembly_desc != NULL)
+            {
+                assembly_type_id = (zaclr_type_id)zaclr_token_row(&runtime_assembly_desc->token);
+                result = zaclr_type_prepare(heap->runtime,
+                                            (struct zaclr_loaded_assembly*)corelib,
+                                            runtime_assembly_desc,
+                                            &method_table);
+                if (result.status != ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+            }
+        }
+    }
+
+    /* Allocate the RuntimeAssembly reference object.
+       owning_assembly = corelib (the assembly where RuntimeAssembly is defined)
+       type_id = RuntimeAssembly typedef row in corelib */
+    const struct zaclr_loaded_assembly* object_assembly = (corelib != NULL) ? corelib : assembly;
+    result = zaclr_heap_allocate_object(heap,
+                                        sizeof(struct zaclr_reference_object_desc)
+                                            + (method_table != NULL && method_table->instance_size > ZACLR_OBJECT_HEADER_SIZE
+                                                ? (size_t)(method_table->instance_size - ZACLR_OBJECT_HEADER_SIZE)
+                                                : sizeof(struct zaclr_stack_value) * 4u),
+                                        object_assembly,
+                                        assembly_type_id,
+                                        ZACLR_OBJECT_FAMILY_INSTANCE,
+                                        ZACLR_OBJECT_FLAG_REFERENCE_TYPE,
+                                        (struct zaclr_object_desc**)&object);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    object->object.header.method_table = method_table;
+    object->compatibility_field_capacity = (method_table != NULL) ? 0u : 4u;
+    object->reserved = 0u;
+
+    /* Set m_assembly field (IntPtr) to point back to the native assembly.
+       m_assembly is the 5th field after the event+3 ref fields:
+       _ModuleResolve (event, slot 0)
+       m_fullname     (string, slot 1)
+       m_syncRoot     (object, slot 2)
+       m_assembly     (IntPtr, slot 3)
+       In CoreCLR this is at a fixed layout offset; we set it via the
+       method table field layout if available, or compatibility slot 3. */
+    if (method_table != NULL && zaclr_method_table_is_prepared(method_table) != 0u)
+    {
+        /* Use the proper field layout through the method table */
+        uint8_t* data = (uint8_t*)object + sizeof(struct zaclr_reference_object_desc);
+        /* m_assembly is the field named "m_assembly" in RuntimeAssembly.
+           Find its offset from the method table field layout. */
+        if (method_table->instance_size > ZACLR_OBJECT_HEADER_SIZE)
+        {
+            /* Walk the field layout to find "m_assembly" offset.
+               For now, store the pointer at the known offset for IntPtr field.
+               CoreCLR layout: _ModuleResolve(8) + m_fullname(8) + m_syncRoot(8) + m_assembly(8) = offset 24 from data start */
+            if (method_table->instance_size - ZACLR_OBJECT_HEADER_SIZE >= 32u)
+            {
+                *(uintptr_t*)(data + 24u) = (uintptr_t)assembly;
+            }
+        }
+    }
+    else
+    {
+        /* Compatibility path: store in slot 3 */
+        struct zaclr_stack_value* fields = (struct zaclr_stack_value*)((uint8_t*)object + sizeof(struct zaclr_reference_object_desc));
+        fields[3].kind = ZACLR_STACK_VALUE_I8;
+        fields[3].data.i8 = (int64_t)(uintptr_t)assembly;
+    }
+
+    *out_handle = zaclr_heap_get_object_handle(heap, &object->object);
+    assembly->exposed_assembly_handle = *out_handle;
+    return zaclr_result_ok();
+}
+
 extern "C" struct zaclr_reference_object_desc* zaclr_reference_object_from_handle(struct zaclr_heap* heap,
                                                                                     zaclr_object_handle handle)
 {
