@@ -10,6 +10,63 @@ extern "C" {
 
 namespace
 {
+    static bool signature_has_this(const struct zaclr_signature_desc* signature)
+    {
+        return signature != NULL && (signature->calling_convention & 0x20u) != 0u;
+    }
+
+    static bool signature_parameter_type_equals(const struct zaclr_signature_type* left,
+                                                const struct zaclr_signature_type* right)
+    {
+        if (left == NULL || right == NULL)
+        {
+            return false;
+        }
+
+        return left->element_type == right->element_type
+            && left->flags == right->flags
+            && left->generic_param_index == right->generic_param_index
+            && left->type_token.raw == right->type_token.raw;
+    }
+
+    static bool method_signatures_match_for_resolution(const struct zaclr_signature_desc* candidate_signature,
+                                                       const struct zaclr_signature_desc* memberref_signature)
+    {
+        uint32_t parameter_index;
+
+        if (candidate_signature == NULL || memberref_signature == NULL)
+        {
+            return false;
+        }
+
+        /* MemberRef method resolution should not depend on return type identity alone.
+           Generic property getters such as EqualityComparer<T>.get_Default carry a return type in the
+           MemberRef that can be more specific (e.g. instantiated generic owner) than the MethodDef
+           signature we parse from metadata. CLR method identity is name + parameter signature, so use
+           the stricter full-signature path first and then fall back to parameter-only matching here. */
+        if (signature_has_this(candidate_signature) != signature_has_this(memberref_signature)
+            || candidate_signature->parameter_count != memberref_signature->parameter_count
+            || candidate_signature->generic_parameter_count != memberref_signature->generic_parameter_count)
+        {
+            return false;
+        }
+
+        for (parameter_index = 0u; parameter_index < candidate_signature->parameter_count; ++parameter_index)
+        {
+            struct zaclr_signature_type candidate_parameter = {};
+            struct zaclr_signature_type memberref_parameter = {};
+
+            if (zaclr_signature_read_method_parameter(candidate_signature, parameter_index, &candidate_parameter).status != ZACLR_STATUS_OK
+                || zaclr_signature_read_method_parameter(memberref_signature, parameter_index, &memberref_parameter).status != ZACLR_STATUS_OK
+                || !signature_parameter_type_equals(&candidate_parameter, &memberref_parameter))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     static struct zaclr_result bind_domain_assembly(struct zaclr_runtime* runtime,
                                                     const char* assembly_name,
                                                     const struct zaclr_loaded_assembly** out_assembly)
@@ -476,7 +533,9 @@ extern "C" struct zaclr_result zaclr_member_resolution_resolve_method(const stru
         if (!zaclr_managed_signatures_equal(*out_assembly,
                                             &candidate->signature,
                                             source_assembly,
-                                            &memberref->signature))
+                                            &memberref->signature)
+            && !method_signatures_match_for_resolution(&candidate->signature,
+                                                       &memberref->signature))
         {
             ZACLR_TRACE_VALUE((struct zaclr_runtime*)runtime,
                               ZACLR_TRACE_CATEGORY_INTEROP,

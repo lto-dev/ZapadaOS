@@ -21,11 +21,19 @@ void   kheap_reserve_until(uintptr_t min_start);
  *
  * Returns a pointer aligned to 16 bytes, or NULL if the heap is exhausted
  * or size is zero.
- *
- * There is no corresponding free operation. This is by design for an early
- * bump allocator.
  */
 void  *kheap_alloc(size_t size);
+
+/*
+ * kheap_free - return a previously allocated block to the heap.
+ *
+ * The block is marked free and coalesced with any adjacent free blocks.
+ * If the freed block lies at the top of used memory the bump pointer is
+ * rewound so the space can be reused without a scan.
+ *
+ * Passing NULL is safe and has no effect.
+ */
+void   kheap_free(void *ptr);
 
 /*
  * kheap_get_free_bytes - return the number of bytes remaining in the heap.

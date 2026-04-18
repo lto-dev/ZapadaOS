@@ -70,6 +70,48 @@ namespace
         *argument = {};
     }
 
+    static void reset_type_arguments(struct zaclr_generic_context* context)
+    {
+        if (context == NULL)
+        {
+            return;
+        }
+
+        if (context->type_args != NULL)
+        {
+            for (uint32_t index = 0u; index < context->type_arg_count; ++index)
+            {
+                reset_argument(&context->type_args[index]);
+            }
+
+            kernel_free(context->type_args);
+        }
+
+        context->type_args = NULL;
+        context->type_arg_count = 0u;
+    }
+
+    static void reset_method_arguments(struct zaclr_generic_context* context)
+    {
+        if (context == NULL)
+        {
+            return;
+        }
+
+        if (context->method_args != NULL)
+        {
+            for (uint32_t index = 0u; index < context->method_arg_count; ++index)
+            {
+                reset_argument(&context->method_args[index]);
+            }
+
+            kernel_free(context->method_args);
+        }
+
+        context->method_args = NULL;
+        context->method_arg_count = 0u;
+    }
+
     static struct zaclr_result clone_argument(struct zaclr_generic_argument* destination,
                                               const struct zaclr_generic_argument* source)
     {
@@ -112,6 +154,171 @@ namespace
             }
         }
 
+        return zaclr_result_ok();
+    }
+
+    static struct zaclr_result clone_argument_array(struct zaclr_generic_argument** out_arguments,
+                                                    uint32_t* out_count,
+                                                    const struct zaclr_generic_argument* source_arguments,
+                                                    uint32_t source_count)
+    {
+        struct zaclr_generic_argument* arguments = NULL;
+        struct zaclr_result result;
+
+        if (out_arguments == NULL || out_count == NULL)
+        {
+            return invalid_argument();
+        }
+
+        *out_arguments = NULL;
+        *out_count = 0u;
+        if (source_arguments == NULL || source_count == 0u)
+        {
+            return zaclr_result_ok();
+        }
+
+        result = allocate_arguments(source_count, &arguments);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        for (uint32_t index = 0u; index < source_count; ++index)
+        {
+            result = clone_argument(&arguments[index], &source_arguments[index]);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                for (uint32_t cleanup_index = 0u; cleanup_index < index; ++cleanup_index)
+                {
+                    reset_argument(&arguments[cleanup_index]);
+                }
+
+                kernel_free(arguments);
+                return result;
+            }
+        }
+
+        *out_arguments = arguments;
+        *out_count = source_count;
+        return zaclr_result_ok();
+    }
+
+    static struct zaclr_result substitute_argument(struct zaclr_generic_argument* destination,
+                                                   const struct zaclr_generic_argument* source,
+                                                   const struct zaclr_generic_context* substitution)
+    {
+        if (destination == NULL || source == NULL)
+        {
+            return invalid_argument();
+        }
+
+        if (substitution != NULL
+            && source->kind == ZACLR_GENERIC_ARGUMENT_KIND_TYPE_VAR
+            && substitution->type_args != NULL
+            && source->generic_param_index < substitution->type_arg_count)
+        {
+            return clone_argument(destination,
+                                  &substitution->type_args[source->generic_param_index]);
+        }
+
+        if (substitution != NULL
+            && source->kind == ZACLR_GENERIC_ARGUMENT_KIND_TYPE_VAR
+            && (substitution->type_args == NULL || substitution->type_arg_count == 0u)
+            && substitution->method_args != NULL
+            && source->generic_param_index < substitution->method_arg_count)
+        {
+            return clone_argument(destination,
+                                  &substitution->method_args[source->generic_param_index]);
+        }
+
+        if (substitution != NULL
+            && source->kind == ZACLR_GENERIC_ARGUMENT_KIND_METHOD_VAR
+            && substitution->method_args != NULL
+            && source->generic_param_index < substitution->method_arg_count)
+        {
+            return clone_argument(destination,
+                                  &substitution->method_args[source->generic_param_index]);
+        }
+
+        if (source->kind != ZACLR_GENERIC_ARGUMENT_KIND_GENERIC_INST
+            || source->instantiation_arg_count == 0u
+            || source->instantiation_args == NULL)
+        {
+            return clone_argument(destination, source);
+        }
+
+        *destination = *source;
+        destination->instantiation_args = NULL;
+
+        struct zaclr_result result = allocate_arguments(source->instantiation_arg_count,
+                                                        &destination->instantiation_args);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            *destination = {};
+            return result;
+        }
+
+        for (uint32_t index = 0u; index < source->instantiation_arg_count; ++index)
+        {
+            result = substitute_argument(&destination->instantiation_args[index],
+                                         &source->instantiation_args[index],
+                                         substitution);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                reset_argument(destination);
+                return result;
+            }
+        }
+
+        return zaclr_result_ok();
+    }
+
+    static struct zaclr_result substitute_argument_array(struct zaclr_generic_argument** out_arguments,
+                                                         uint32_t* out_count,
+                                                         const struct zaclr_generic_argument* source_arguments,
+                                                         uint32_t source_count,
+                                                         const struct zaclr_generic_context* substitution)
+    {
+        struct zaclr_generic_argument* arguments = NULL;
+        struct zaclr_result result;
+
+        if (out_arguments == NULL || out_count == NULL)
+        {
+            return invalid_argument();
+        }
+
+        *out_arguments = NULL;
+        *out_count = 0u;
+        if (source_arguments == NULL || source_count == 0u)
+        {
+            return zaclr_result_ok();
+        }
+
+        result = allocate_arguments(source_count, &arguments);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        for (uint32_t index = 0u; index < source_count; ++index)
+        {
+            result = substitute_argument(&arguments[index],
+                                         &source_arguments[index],
+                                         substitution);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                for (uint32_t cleanup_index = 0u; cleanup_index < index; ++cleanup_index)
+                {
+                    reset_argument(&arguments[cleanup_index]);
+                }
+
+                kernel_free(arguments);
+                return result;
+            }
+        }
+
+        *out_arguments = arguments;
+        *out_count = source_count;
         return zaclr_result_ok();
     }
 
@@ -486,29 +693,12 @@ extern "C" void zaclr_generic_context_reset(struct zaclr_generic_context* contex
         return;
     }
 
-    if (context->type_args != NULL)
-    {
-        for (uint32_t index = 0u; index < context->type_arg_count; ++index)
-        {
-            reset_argument(&context->type_args[index]);
-        }
-        kernel_free(context->type_args);
-    }
-
-    if (context->method_args != NULL)
-    {
-        for (uint32_t index = 0u; index < context->method_arg_count; ++index)
-        {
-            reset_argument(&context->method_args[index]);
-        }
-        kernel_free(context->method_args);
-    }
-
-    *context = {};
+    reset_type_arguments(context);
+    reset_method_arguments(context);
 }
 
 extern "C" struct zaclr_result zaclr_generic_context_clone(struct zaclr_generic_context* destination,
-                                                             const struct zaclr_generic_context* source)
+                                                              const struct zaclr_generic_context* source)
 {
     struct zaclr_result result;
 
@@ -563,6 +753,60 @@ extern "C" struct zaclr_result zaclr_generic_context_clone(struct zaclr_generic_
         }
     }
     destination->method_arg_count = source->method_arg_count;
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_generic_context_assign_type_args(struct zaclr_generic_context* destination,
+                                                                        const struct zaclr_generic_context* source)
+{
+    struct zaclr_generic_argument* type_args = NULL;
+    uint32_t type_arg_count = 0u;
+    struct zaclr_result result;
+
+    if (destination == NULL)
+    {
+        return invalid_argument();
+    }
+
+    result = clone_argument_array(&type_args,
+                                  &type_arg_count,
+                                  source != NULL ? source->type_args : NULL,
+                                  source != NULL ? source->type_arg_count : 0u);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    reset_type_arguments(destination);
+    destination->type_args = type_args;
+    destination->type_arg_count = type_arg_count;
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_generic_context_assign_method_args(struct zaclr_generic_context* destination,
+                                                                          const struct zaclr_generic_context* source)
+{
+    struct zaclr_generic_argument* method_args = NULL;
+    uint32_t method_arg_count = 0u;
+    struct zaclr_result result;
+
+    if (destination == NULL)
+    {
+        return invalid_argument();
+    }
+
+    result = clone_argument_array(&method_args,
+                                  &method_arg_count,
+                                  source != NULL ? source->method_args : NULL,
+                                  source != NULL ? source->method_arg_count : 0u);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    reset_method_arguments(destination);
+    destination->method_args = method_args;
+    destination->method_arg_count = method_arg_count;
     return zaclr_result_ok();
 }
 
@@ -705,4 +949,52 @@ extern "C" struct zaclr_result zaclr_generic_context_resolve_signature_type(cons
         default:
             return unsupported();
     }
+}
+
+extern "C" struct zaclr_result zaclr_generic_context_substitute_type_args(
+    struct zaclr_generic_context* out_context,
+    const struct zaclr_generic_context* source,
+    const struct zaclr_generic_context* substitution)
+{
+    if (out_context == NULL)
+    {
+        return invalid_argument();
+    }
+
+    zaclr_generic_context_reset(out_context);
+
+    if (source == NULL || source->type_arg_count == 0u || source->type_args == NULL)
+    {
+        return zaclr_result_ok();
+    }
+
+    return substitute_argument_array(&out_context->type_args,
+                                     &out_context->type_arg_count,
+                                     source->type_args,
+                                     source->type_arg_count,
+                                     substitution);
+}
+
+extern "C" struct zaclr_result zaclr_generic_context_substitute_method_args(
+    struct zaclr_generic_context* out_context,
+    const struct zaclr_generic_context* source,
+    const struct zaclr_generic_context* substitution)
+{
+    if (out_context == NULL)
+    {
+        return invalid_argument();
+    }
+
+    zaclr_generic_context_reset(out_context);
+
+    if (source == NULL || source->method_arg_count == 0u || source->method_args == NULL)
+    {
+        return zaclr_result_ok();
+    }
+
+    return substitute_argument_array(&out_context->method_args,
+                                     &out_context->method_arg_count,
+                                     source->method_args,
+                                     source->method_arg_count,
+                                     substitution);
 }

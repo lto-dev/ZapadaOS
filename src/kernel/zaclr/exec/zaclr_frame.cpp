@@ -198,6 +198,7 @@ namespace
         values = (struct zaclr_stack_value*)kernel_alloc(sizeof(struct zaclr_stack_value) * count);
         if (values == NULL)
         {
+            console_write("[ZACLR][frame-create] frame alloc failed\n");
             return zaclr_result_make(ZACLR_STATUS_OUT_OF_MEMORY, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
@@ -424,6 +425,13 @@ namespace
         frame = (struct zaclr_frame*)kernel_alloc(sizeof(struct zaclr_frame));
         if (frame == NULL)
         {
+            console_write("[ZACLR][frame-create] kernel_alloc frame failed method=");
+            console_write(method != NULL && method->name.text != NULL ? method->name.text : "<null>");
+            console_write(" size=");
+            console_write_dec((uint64_t)sizeof(struct zaclr_frame));
+            console_write(" free_bytes=");
+            console_write_dec((uint64_t)kernel_get_free_bytes());
+            console_write("\n");
             return zaclr_result_make(ZACLR_STATUS_OUT_OF_MEMORY, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
@@ -440,6 +448,11 @@ namespace
             result = zaclr_generic_context_clone(&frame->generic_context, &parent->generic_context);
             if (result.status != ZACLR_STATUS_OK)
             {
+                console_write("[ZACLR][frame-create] generic_context_clone failed status=");
+                console_write_dec((uint64_t)result.status);
+                console_write(" category=");
+                console_write_dec((uint64_t)result.category);
+                console_write("\n");
                 kernel_free(frame);
                 return result;
             }
@@ -473,6 +486,13 @@ namespace
 
             if (header_size_dwords < 3u)
             {
+                console_write("[ZACLR][frame-create] bad fat header size method=");
+                console_write(method != NULL && method->name.text != NULL ? method->name.text : "<null>");
+                console_write(" fat_flags=");
+                console_write_hex64((uint64_t)fat_header_flags);
+                console_write(" header_dwords=");
+                console_write_dec((uint64_t)header_size_dwords);
+                console_write("\n");
                 kernel_free(frame);
                 return zaclr_result_make(ZACLR_STATUS_BAD_IMAGE, ZACLR_STATUS_CATEGORY_EXEC);
             }
@@ -480,12 +500,29 @@ namespace
             frame->max_stack = read_u16(body + 2u);
             frame->il_size = read_u32(body + 4u);
             frame->il_start = body + header_size_bytes;
-            result = parse_local_count(assembly, local_sig_token, &frame->local_count);
-            if (result.status != ZACLR_STATUS_OK)
-            {
-                kernel_free(frame);
-                return result;
-            }
+        result = parse_local_count(assembly, local_sig_token, &frame->local_count);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            console_write("[ZACLR][frame-create] parse_local_count failed status=");
+            console_write_dec((uint64_t)result.status);
+            console_write(" category=");
+            console_write_dec((uint64_t)result.category);
+            console_write(" method=");
+            console_write(method != NULL && method->name.text != NULL ? method->name.text : "<null>");
+            console_write("\n");
+            kernel_free(frame);
+            return result;
+        }
+
+        console_write("[ZACLR][frame-create] parsed fat header max_stack=");
+        console_write_dec((uint64_t)frame->max_stack);
+        console_write(" il_size=");
+        console_write_dec((uint64_t)frame->il_size);
+        console_write(" local_count=");
+        console_write_dec((uint64_t)frame->local_count);
+        console_write(" method=");
+        console_write(method != NULL && method->name.text != NULL ? method->name.text : "<null>");
+        console_write("\n");
 
             if ((fat_header_flags & 0x0008u) != 0u)
             {
@@ -497,6 +534,13 @@ namespace
                                                  &frame->exception_clause_count);
                 if (result.status != ZACLR_STATUS_OK)
                 {
+                    console_write("[ZACLR][frame-create] exception section failed status=");
+                    console_write_dec((uint64_t)result.status);
+                    console_write(" category=");
+                    console_write_dec((uint64_t)result.category);
+                    console_write(" method=");
+                    console_write(method != NULL && method->name.text != NULL ? method->name.text : "<null>");
+                    console_write("\n");
                     kernel_free(frame);
                     return result;
                 }
@@ -504,6 +548,11 @@ namespace
         }
         else
         {
+            console_write("[ZACLR][frame-create] unrecognized header format method=");
+            console_write(method != NULL && method->name.text != NULL ? method->name.text : "<null>");
+            console_write(" header=");
+            console_write_hex64((uint64_t)header);
+            console_write("\n");
             kernel_free(frame);
             return zaclr_result_make(ZACLR_STATUS_BAD_IMAGE, ZACLR_STATUS_CATEGORY_EXEC);
         }
@@ -511,6 +560,13 @@ namespace
         result = allocate_stack_values(frame->argument_count, &frame->arguments);
         if (result.status != ZACLR_STATUS_OK)
         {
+            console_write("[ZACLR][frame-create] allocate arguments failed count=");
+            console_write_dec((uint64_t)frame->argument_count);
+            console_write(" status=");
+            console_write_dec((uint64_t)result.status);
+            console_write(" category=");
+            console_write_dec((uint64_t)result.category);
+            console_write("\n");
             kernel_free(frame);
             return result;
         }
@@ -518,6 +574,13 @@ namespace
         result = allocate_stack_values(frame->local_count, &frame->locals);
         if (result.status != ZACLR_STATUS_OK)
         {
+            console_write("[ZACLR][frame-create] allocate locals failed count=");
+            console_write_dec((uint64_t)frame->local_count);
+            console_write(" status=");
+            console_write_dec((uint64_t)result.status);
+            console_write(" category=");
+            console_write_dec((uint64_t)result.category);
+            console_write("\n");
             if (frame->arguments != NULL)
             {
                 kernel_free(frame->arguments);
@@ -529,6 +592,13 @@ namespace
         result = zaclr_eval_stack_initialize(&frame->eval_stack, frame->max_stack);
         if (result.status != ZACLR_STATUS_OK)
         {
+            console_write("[ZACLR][frame-create] eval stack init failed max_stack=");
+            console_write_dec((uint64_t)frame->max_stack);
+            console_write(" status=");
+            console_write_dec((uint64_t)result.status);
+            console_write(" category=");
+            console_write_dec((uint64_t)result.category);
+            console_write("\n");
             if (frame->locals != NULL)
             {
                 kernel_free(frame->locals);

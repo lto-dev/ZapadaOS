@@ -43,6 +43,10 @@ struct zaclr_generic_context {
 void zaclr_generic_context_reset(struct zaclr_generic_context* context);
 struct zaclr_result zaclr_generic_context_clone(struct zaclr_generic_context* destination,
                                                 const struct zaclr_generic_context* source);
+struct zaclr_result zaclr_generic_context_assign_type_args(struct zaclr_generic_context* destination,
+                                                           const struct zaclr_generic_context* source);
+struct zaclr_result zaclr_generic_context_assign_method_args(struct zaclr_generic_context* destination,
+                                                             const struct zaclr_generic_context* source);
 struct zaclr_result zaclr_generic_context_set_method_instantiation(struct zaclr_generic_context* context,
                                                                    const struct zaclr_loaded_assembly* current_assembly,
                                                                    struct zaclr_runtime* runtime,
@@ -60,6 +64,17 @@ struct zaclr_result zaclr_generic_context_resolve_signature_type(const struct za
                                                                  struct zaclr_runtime* runtime,
                                                                  const struct zaclr_signature_type* signature_type,
                                                                  struct zaclr_generic_argument* out_argument);
+
+/* Produce a new context whose type_args are a copy of source->type_args with any
+   TYPE_VAR and METHOD_VAR entries substituted using the corresponding slot from
+   substitution->type_args / substitution->method_args respectively.
+   The returned context has method_arg_count == 0 (type args only). */
+struct zaclr_result zaclr_generic_context_substitute_type_args(struct zaclr_generic_context* out_context,
+                                                                 const struct zaclr_generic_context* source,
+                                                                 const struct zaclr_generic_context* substitution);
+struct zaclr_result zaclr_generic_context_substitute_method_args(struct zaclr_generic_context* out_context,
+                                                                 const struct zaclr_generic_context* source,
+                                                                 const struct zaclr_generic_context* substitution);
 
 #ifdef __cplusplus
 }

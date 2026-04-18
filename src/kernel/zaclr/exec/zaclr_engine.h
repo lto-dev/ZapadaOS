@@ -24,6 +24,12 @@ struct zaclr_result zaclr_engine_execute_method(struct zaclr_engine* engine,
                                                 struct zaclr_launch_state* launch_state,
                                                 const struct zaclr_loaded_assembly* assembly,
                                                 const struct zaclr_method_desc* method);
+struct zaclr_result zaclr_engine_execute_method_with_type_context(struct zaclr_engine* engine,
+                                                                   struct zaclr_runtime* runtime,
+                                                                   struct zaclr_launch_state* launch_state,
+                                                                   const struct zaclr_loaded_assembly* assembly,
+                                                                   const struct zaclr_method_desc* method,
+                                                                   const struct zaclr_generic_context* type_context);
 struct zaclr_result zaclr_engine_execute_instance_method(struct zaclr_engine* engine,
                                                           struct zaclr_runtime* runtime,
                                                           struct zaclr_launch_state* launch_state,

@@ -706,6 +706,7 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* he
     struct zaclr_result result;
     struct zaclr_method_table* method_table = NULL;
     const struct zaclr_type_desc* runtime_type_desc = NULL;
+    const struct zaclr_loaded_assembly* corelib = NULL;
 
     if (heap == NULL || out_runtime_type == NULL)
     {
@@ -715,7 +716,6 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* he
     if (heap->runtime != NULL)
     {
         const struct zaclr_app_domain* domain = zaclr_runtime_current_domain(heap->runtime);
-        const struct zaclr_loaded_assembly* corelib = NULL;
         if (domain != NULL)
         {
             corelib = zaclr_assembly_registry_find_by_name(&domain->registry, "System.Private.CoreLib");
@@ -738,11 +738,27 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* he
         }
     }
 
+    /*
+     * The object's CLR identity is RuntimeType (defined in CoreLib), not the
+     * type this RuntimeType instance represents.  owning_assembly must be
+     * CoreLib and type_id must be RuntimeType's typedef row so that
+     * castclass / isinst walk the correct inheritance chain
+     * (RuntimeType -> Type -> MemberInfo -> Object).
+     *
+     * type_assembly / type_token are stored on zaclr_runtime_type_desc to
+     * track what this RuntimeType represents -- they are NOT the object's
+     * CLR class identity.
+     */
+    const struct zaclr_loaded_assembly* object_assembly = (corelib != NULL) ? corelib : type_assembly;
+    zaclr_type_id runtime_type_id = (runtime_type_desc != NULL)
+        ? (zaclr_type_id)zaclr_token_row(&runtime_type_desc->token)
+        : 0u;
+
     *out_runtime_type = NULL;
     result = zaclr_heap_allocate_object(heap,
                                         sizeof(struct zaclr_runtime_type_desc),
-                                        type_assembly,
-                                        0u,
+                                        object_assembly,
+                                        runtime_type_id,
                                         ZACLR_OBJECT_FAMILY_RUNTIME_TYPE,
                                         ZACLR_OBJECT_FLAG_REFERENCE_TYPE,
                                         (struct zaclr_object_desc**)&runtime_type);
@@ -754,6 +770,7 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* he
     runtime_type->object.header.method_table = method_table;
     runtime_type->type_assembly = type_assembly;
     runtime_type->type_token = type_token;
+    runtime_type->native_type_handle = (uintptr_t)&runtime_type->object;
     *out_runtime_type = runtime_type;
     return zaclr_result_ok();
 }
@@ -804,6 +821,81 @@ extern "C" const struct zaclr_runtime_type_desc* zaclr_runtime_type_from_handle_
                                                                                         zaclr_object_handle handle)
 {
     return (const struct zaclr_runtime_type_desc*)zaclr_heap_get_object(heap, handle);
+}
+
+extern "C" struct zaclr_result zaclr_runtime_type_find_by_native_handle(struct zaclr_runtime* runtime,
+                                                                         uintptr_t native_handle,
+                                                                         zaclr_object_handle* out_handle)
+{
+    const struct zaclr_app_domain* domain;
+
+    if (runtime == NULL || out_handle == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    *out_handle = 0u;
+    console_write("[ZACLR][rtype-lookup] search native_handle=");
+    console_write_hex64((uint64_t)native_handle);
+    console_write("\n");
+    if (native_handle == 0u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    domain = zaclr_runtime_current_domain(runtime);
+    if (domain == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    for (uint32_t asm_index = 0u; asm_index < domain->registry.count; ++asm_index)
+    {
+        const struct zaclr_loaded_assembly* assembly = &domain->registry.entries[asm_index];
+        if (assembly == NULL || assembly->runtime_type_cache == NULL)
+        {
+            continue;
+        }
+
+        for (uint32_t type_index = 0u; type_index < assembly->runtime_type_cache_count; ++type_index)
+        {
+            zaclr_object_handle candidate_handle = assembly->runtime_type_cache[type_index];
+            const struct zaclr_runtime_type_desc* candidate;
+            uintptr_t candidate_native_handle;
+
+            if (candidate_handle == 0u)
+            {
+                continue;
+            }
+
+            candidate = zaclr_runtime_type_from_handle_const(&runtime->heap, candidate_handle);
+            if (candidate == NULL)
+            {
+                continue;
+            }
+
+            candidate_native_handle = candidate->native_type_handle;
+            if (type_index < 4u)
+            {
+                console_write("[ZACLR][rtype-lookup] candidate idx=");
+                console_write_dec((uint64_t)type_index);
+                console_write(" handle=");
+                console_write_hex64((uint64_t)candidate_handle);
+                console_write(" native=");
+                console_write_hex64((uint64_t)candidate_native_handle);
+                console_write(" token=");
+                console_write_hex64((uint64_t)candidate->type_token.raw);
+                console_write("\n");
+            }
+            if (candidate_native_handle == native_handle)
+            {
+                *out_handle = candidate_handle;
+                return zaclr_result_ok();
+            }
+        }
+    }
+
+    return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
 }
 
 extern "C" const struct zaclr_field_layout* zaclr_reference_object_field_layout(const struct zaclr_reference_object_desc* object,

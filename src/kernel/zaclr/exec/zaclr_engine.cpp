@@ -197,6 +197,46 @@ extern "C" struct zaclr_result zaclr_engine_execute_method(struct zaclr_engine* 
     return zaclr_engine_execute_frame_loop(engine, runtime, launch_state, current_frame, false);
 }
 
+extern "C" struct zaclr_result zaclr_engine_execute_method_with_type_context(
+    struct zaclr_engine* engine,
+    struct zaclr_runtime* runtime,
+    struct zaclr_launch_state* launch_state,
+    const struct zaclr_loaded_assembly* assembly,
+    const struct zaclr_method_desc* method,
+    const struct zaclr_generic_context* type_context)
+{
+    struct zaclr_frame* current_frame;
+    struct zaclr_result result;
+
+    if (engine == NULL || runtime == NULL || launch_state == NULL || assembly == NULL || method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_frame_create_child(engine,
+                                      runtime,
+                                      NULL,
+                                      assembly,
+                                      method,
+                                      &current_frame);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (type_context != NULL && type_context->type_arg_count > 0u)
+    {
+        result = zaclr_generic_context_clone(&current_frame->generic_context, type_context);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            zaclr_frame_destroy(current_frame);
+            return result;
+        }
+    }
+
+    return zaclr_engine_execute_frame_loop(engine, runtime, launch_state, current_frame, false);
+}
+
 extern "C" struct zaclr_result zaclr_engine_execute_instance_method(struct zaclr_engine* engine,
                                                                         struct zaclr_runtime* runtime,
                                                                         struct zaclr_launch_state* launch_state,

@@ -9,7 +9,12 @@ void* kernel_alloc(size_t size)
 
 void kernel_free(void* ptr)
 {
-    (void)ptr;
+    kheap_free(ptr);
+}
+
+size_t kernel_get_free_bytes(void)
+{
+    return kheap_get_free_bytes();
 }
 
 void kernel_memcpy(void* dst, const void* src, uint32_t n)

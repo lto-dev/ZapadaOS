@@ -44,6 +44,7 @@ struct zaclr_runtime_type_desc {
     struct zaclr_object_desc object;
     const struct zaclr_loaded_assembly* type_assembly;
     struct zaclr_token type_token;
+    uintptr_t native_type_handle;
 };
 
 struct zaclr_runtime;
@@ -122,7 +123,10 @@ struct zaclr_runtime_type_desc* zaclr_runtime_type_from_handle(struct zaclr_heap
 const struct zaclr_reference_object_desc* zaclr_reference_object_from_handle_const(const struct zaclr_heap* heap,
                                                                                   zaclr_object_handle handle);
 const struct zaclr_runtime_type_desc* zaclr_runtime_type_from_handle_const(const struct zaclr_heap* heap,
-                                                                           zaclr_object_handle handle);
+                                                                            zaclr_object_handle handle);
+struct zaclr_result zaclr_runtime_type_find_by_native_handle(struct zaclr_runtime* runtime,
+                                                             uintptr_t native_handle,
+                                                             zaclr_object_handle* out_handle);
 struct zaclr_result zaclr_reference_object_store_field(struct zaclr_reference_object_desc* object,
                                                        struct zaclr_token token,
                                                        const struct zaclr_stack_value* value);

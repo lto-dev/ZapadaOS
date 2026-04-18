@@ -17,6 +17,28 @@ extern "C" {
 
 namespace
 {
+    /* RuntimeHelpers intrinsics reference map for future ZACLR bring-up:
+       - CoreCLR managed declaration + [Intrinsic] marker:
+         CLONES/runtime/src/coreclr/System.Private.CoreLib/src/System/Runtime/CompilerServices/RuntimeHelpers.CoreCLR.cs
+       - CoreCLR method identity table used by the runtime:
+         CLONES/runtime/src/coreclr/vm/corelib.h
+       - CoreCLR EE/JIT-side replacement logic:
+         CLONES/runtime/src/coreclr/vm/jitinterface.cpp
+       - NativeAOT / shared-compiler fallback stub generation:
+         CLONES/runtime/src/coreclr/tools/Common/TypeSystem/IL/Stubs/RuntimeHelpersIntrinsics.cs
+         CLONES/runtime/src/coreclr/nativeaot/System.Private.CoreLib/src/System/Runtime/CompilerServices/RuntimeHelpers.NativeAot.cs
+
+       RuntimeHelpers methods currently listed in corelib.h that should be reviewed as mandatory runtime
+       intrinsics / EE-owned helpers instead of ordinary IL fallback whenever ZACLR reaches them:
+       - IsBitwiseEquatable
+       - GetRawData
+       - GetUninitializedObject
+       - EnumEquals
+       - EnumCompareTo
+       - AllocTailCallArgBuffer
+       - DispatchTailCalls
+    */
+
     static bool text_equals(const char* left, const char* right)
     {
         return zaclr_text_equals(left, right);
@@ -146,6 +168,29 @@ namespace
             && method->signature.parameter_count == 1u;
     }
 
+    /*
+     * RuntimeHelpers.IsBitwiseEquatable<T>()
+     * This is a JIT intrinsic.  Its IL body is `newobj NotSupportedException; throw`, which
+     * is never reached by a native JIT compiler.  ZACLR must intercept it before the IL is
+     * executed, otherwise the NotSupportedException allocation will OOM the managed heap
+     * (the object accumulates with every call since there is no finalizer to reclaim it).
+     * We always return false (0) so that callers (e.g. Array.LastIndexOf) take the
+     * EqualityComparer<T> slow path, which is fully supported by ZACLR.
+     */
+    static bool is_runtimehelpers_isbitwiseequatable_intrinsic(const struct zaclr_type_desc* type,
+                                                               const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System.Runtime.CompilerServices")
+            && text_equals(type->type_name.text, "RuntimeHelpers")
+            && text_equals(method->name.text, "IsBitwiseEquatable")
+            && method->signature.parameter_count == 0u;
+    }
+
     static bool is_methodtable_hasfinalizer_intrinsic(const struct zaclr_type_desc* type,
                                                       const struct zaclr_method_desc* method)
     {
@@ -262,7 +307,13 @@ static struct zaclr_result invoke_unsafe_aspointer_intrinsic(struct zaclr_frame*
 {
     struct zaclr_stack_value value = {};
     struct zaclr_result result;
-    int64_t pointer_value = 0;
+    uintptr_t pointer_value = 0u;
+
+    ZACLR_TRACE_VALUE(frame != NULL ? frame->runtime : NULL,
+                      ZACLR_TRACE_CATEGORY_EXEC,
+                      ZACLR_TRACE_EVENT_CALL_TARGET,
+                      "UnsafeAsPointerIntrinsic",
+                      1u);
 
     if (frame == NULL)
     {
@@ -277,7 +328,7 @@ static struct zaclr_result invoke_unsafe_aspointer_intrinsic(struct zaclr_frame*
 
     if (value.kind == ZACLR_STACK_VALUE_BYREF)
     {
-        pointer_value = (int64_t)(uintptr_t)value.data.raw;
+        pointer_value = (uintptr_t)value.data.raw;
     }
     else if (value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
     {
@@ -287,15 +338,28 @@ static struct zaclr_result invoke_unsafe_aspointer_intrinsic(struct zaclr_frame*
             return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        pointer_value = (int64_t)(uintptr_t)target;
+        pointer_value = (uintptr_t)target;
+    }
+    else if (value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+    {
+        pointer_value = (uintptr_t)value.data.object_reference;
+    }
+    else if (value.kind == ZACLR_STACK_VALUE_I8)
+    {
+        pointer_value = (uintptr_t)value.data.i8;
+    }
+    else if (value.kind == ZACLR_STACK_VALUE_I4)
+    {
+        pointer_value = (uintptr_t)(uint32_t)value.data.i4;
     }
     else
     {
-        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
-    return push_i8(frame, pointer_value);
+    return push_i8(frame, (int64_t)pointer_value);
 }
+
 
 static struct zaclr_result invoke_unsafe_add_intrinsic(struct zaclr_frame* frame)
 {
@@ -356,6 +420,79 @@ static struct zaclr_result invoke_vector_ishardwareaccelerated_intrinsic(struct 
     }
 
     return push_i4(frame, 0);
+}
+
+static struct zaclr_result invoke_runtimehelpers_isbitwiseequatable_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value generic_owner = {};
+    const struct zaclr_method_table* method_table = NULL;
+    uint8_t result_value = 0u;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    /* CoreCLR does not execute the placeholder IL body for RuntimeHelpers.IsBitwiseEquatable<T>().
+       It recognizes the exact RuntimeHelpers method identity in vm/corelib.h and replaces the body in
+       vm/jitinterface.cpp:getILIntrinsicImplementationForRuntimeHelpers(). ZACLR mirrors that policy here
+       in the interpreter rather than allowing fallback to the dummy managed body.
+
+       Current conservative rule set:
+       - primitive scalar value types (1/2/4/8-byte, pointer-sized, char, bool) => true
+       - enums => true
+       - any reference type / array / string / component-sized type / type containing references => false
+       - other value types => false for now until ZACLR gains a full CanCompareBits-style analysis
+
+       This keeps the semantics safe and avoids routing Array.LastIndexOf / MemoryExtensions into the JIT-
+       only NotSupported-style path when the runtime is interpreter-first. */
+    {
+        struct zaclr_result pop_result = zaclr_eval_stack_pop(&frame->eval_stack, &generic_owner);
+        if (pop_result.status == ZACLR_STATUS_OK)
+        {
+            if (generic_owner.kind == ZACLR_STACK_VALUE_I8)
+            {
+                method_table = (const struct zaclr_method_table*)(uintptr_t)generic_owner.data.i8;
+            }
+            else if (generic_owner.kind == ZACLR_STACK_VALUE_I4)
+            {
+                method_table = (const struct zaclr_method_table*)(uintptr_t)(uint32_t)generic_owner.data.i4;
+            }
+        }
+    }
+
+    if (method_table != NULL)
+    {
+        if (zaclr_method_table_is_enum(method_table) != 0u)
+        {
+            result_value = 1u;
+        }
+        else if (zaclr_method_table_is_value_type(method_table) != 0u
+                 && zaclr_method_table_contains_references(method_table) == 0u
+                 && zaclr_method_table_component_size(method_table) == 0u)
+        {
+            uint32_t payload_size = zaclr_method_table_instance_size(method_table);
+            if (payload_size >= (uint32_t)sizeof(struct zaclr_object_desc))
+            {
+                payload_size -= (uint32_t)sizeof(struct zaclr_object_desc);
+            }
+            else
+            {
+                payload_size = 0u;
+            }
+
+            if (payload_size == 1u
+                || payload_size == 2u
+                || payload_size == 4u
+                || payload_size == 8u
+                || payload_size == sizeof(uintptr_t))
+            {
+                result_value = 1u;
+            }
+        }
+    }
+
+    return push_i4(frame, result_value != 0u ? 1 : 0);
 }
 
 static struct zaclr_result invoke_runtimehelpers_getmethodtable_intrinsic(struct zaclr_frame* frame)
@@ -653,6 +790,7 @@ static struct zaclr_result invoke_gchandle_gethandlevalue_intrinsic(struct zaclr
 {
     struct zaclr_stack_value value = {};
     struct zaclr_result result;
+    const void* payload = NULL;
 
     if (frame == NULL)
     {
@@ -665,9 +803,64 @@ static struct zaclr_result invoke_gchandle_gethandlevalue_intrinsic(struct zaclr
         return result;
     }
 
+    if (value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+    {
+        struct zaclr_stack_value* target = resolve_local_address_target(frame, &value);
+        if (target == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        value = *target;
+    }
+
+    if (value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE && value.data.object_reference != NULL)
+    {
+        const struct zaclr_boxed_value_desc* boxed_value = (const struct zaclr_boxed_value_desc*)value.data.object_reference;
+        if ((zaclr_object_flags(&boxed_value->object) & ZACLR_OBJECT_FLAG_BOXED_VALUE) != 0u)
+        {
+            value = boxed_value->value;
+        }
+    }
+
     if (value.kind == ZACLR_STACK_VALUE_I8)
     {
         return push_i8(frame, value.data.i8 & ~1ll);
+    }
+
+    if (value.kind == ZACLR_STACK_VALUE_VALUETYPE)
+    {
+        payload = zaclr_stack_value_payload_const(&value);
+        if (payload == NULL || value.payload_size == 0u)
+        {
+            return push_i4(frame, 0);
+        }
+
+        if (value.payload_size >= sizeof(int64_t))
+        {
+            int64_t raw = 0;
+            const uint8_t* bytes = (const uint8_t*)payload;
+            for (uint32_t index = 0u; index < sizeof(int64_t); ++index)
+            {
+                raw |= ((int64_t)bytes[index]) << (index * 8u);
+            }
+
+            return push_i8(frame, raw & ~1ll);
+        }
+
+        if (value.payload_size >= sizeof(int32_t))
+        {
+            int32_t raw = 0;
+            const uint8_t* bytes = (const uint8_t*)payload;
+            for (uint32_t index = 0u; index < sizeof(int32_t); ++index)
+            {
+                raw |= (int32_t)((uint32_t)bytes[index] << (index * 8u));
+            }
+
+            return push_i4(frame, raw & ~1);
+        }
+
+        return push_i4(frame, 0);
     }
 
     return push_i4(frame, value.data.i4 & ~1);
@@ -790,6 +983,11 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
     if (is_runtimehelpers_objecthascomponentsize_intrinsic(effective_type, method))
     {
         return invoke_runtimehelpers_objecthascomponentsize_intrinsic(frame);
+    }
+
+    if (is_runtimehelpers_isbitwiseequatable_intrinsic(effective_type, method))
+    {
+        return invoke_runtimehelpers_isbitwiseequatable_intrinsic(frame);
     }
 
     if (is_methodtable_hasfinalizer_intrinsic(effective_type, method))

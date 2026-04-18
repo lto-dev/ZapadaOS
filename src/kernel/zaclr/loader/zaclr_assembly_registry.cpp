@@ -70,7 +70,27 @@ extern "C" struct zaclr_result zaclr_assembly_registry_register(struct zaclr_ass
         kernel_memset(new_entries, 0, sizeof(struct zaclr_loaded_assembly) * new_capacity);
         if (registry->entries != NULL) {
             kernel_memcpy(new_entries, registry->entries, sizeof(struct zaclr_loaded_assembly) * registry->count);
-            kernel_free(registry->entries);
+            /*
+             * Do NOT call kernel_free(registry->entries) here.
+             *
+             * The zaclr_loaded_assembly structs are stored by value in a flat array.
+             * Pointers of type const struct zaclr_loaded_assembly* are kept by many
+             * long-lived structures: boot_launch.assembly, frame->assembly in every
+             * active or past frame, zaclr_method_table::assembly, managed object
+             * headers (owning_assembly), GC roots, and the interop cache entries.
+             *
+             * Freeing the old array returns it to the kernel heap free list.  A
+             * subsequent allocation will zero-fill it (via block_zero_user), turning
+             * every stale pointer into a read of all-zeros: id=0, metadata=zeroed,
+             * user_string_heap.data=NULL, etc.  This silently breaks ldstr, interop
+             * cache lookups, and GCHandle operations the moment those stale pointers
+             * are dereferenced.
+             *
+             * Because the kernel never unloads assemblies and the registry grows at
+             * most a handful of times during startup, leaking the old array
+             * (typically 4 x ~2.9 KB = ~12 KB per grow) is the correct and safe
+             * trade-off.  All existing pointers remain permanently valid.
+             */
         }
 
         registry->entries = new_entries;

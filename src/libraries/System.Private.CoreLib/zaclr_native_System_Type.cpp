@@ -51,26 +51,21 @@ namespace
                                                         zaclr_object_handle* out_handle)
     {
         int64_t raw_handle = 0;
-        struct zaclr_type_identity identity = {};
         struct zaclr_result result = zaclr_native_call_frame_arg_i8(&frame, index, &raw_handle);
         if (result.status != ZACLR_STATUS_OK)
         {
             return result;
         }
 
-        *out_handle = (zaclr_object_handle)(uintptr_t)raw_handle;
-        if (*out_handle == 0u)
+        *out_handle = 0u;
+        if (raw_handle == 0)
         {
             return zaclr_result_ok();
         }
 
-        result = zaclr_type_identity_from_runtime_type_handle(frame.runtime, *out_handle, &identity);
-        if (result.status == ZACLR_STATUS_OK)
-        {
-            zaclr_type_identity_reset(&identity);
-        }
-
-        return result;
+        return zaclr_runtime_type_find_by_native_handle(frame.runtime,
+                                                        (uintptr_t)raw_handle,
+                                                        out_handle);
     }
 }
 

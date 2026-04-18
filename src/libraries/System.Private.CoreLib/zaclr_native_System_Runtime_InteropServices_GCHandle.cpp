@@ -10,11 +10,6 @@ namespace
 {
     static const uint64_t k_handle_shift = 1u;
 
-    static int64_t encode_handle_index(uint32_t index)
-    {
-        return (int64_t)(((uint64_t)index + 1u) << k_handle_shift);
-    }
-
     static struct zaclr_handle_table* gc_handle_table(struct zaclr_native_call_frame& frame)
     {
         return frame.runtime != NULL ? &frame.runtime->boot_launch.handle_table : NULL;
@@ -45,6 +40,36 @@ namespace
         return true;
     }
 
+    static bool try_decode_handle_table_pointer(struct zaclr_handle_table* table,
+                                                int64_t handle_value,
+                                                uint32_t* out_index)
+    {
+        uintptr_t raw_handle;
+        uintptr_t base;
+        uintptr_t end;
+
+        if (table == NULL || out_index == NULL || table->entries == NULL || table->capacity == 0u || handle_value <= 0)
+        {
+            return false;
+        }
+
+        raw_handle = (uintptr_t)handle_value;
+        base = (uintptr_t)&table->entries[0].handle;
+        end = (uintptr_t)&table->entries[table->capacity].handle;
+        if (raw_handle < base || raw_handle >= end)
+        {
+            return false;
+        }
+
+        if (((raw_handle - base) % sizeof(struct zaclr_gc_handle_entry)) != 0u)
+        {
+            return false;
+        }
+
+        *out_index = (uint32_t)((raw_handle - base) / sizeof(struct zaclr_gc_handle_entry));
+        return *out_index < table->count;
+    }
+
     static struct zaclr_result get_entry(struct zaclr_native_call_frame& frame,
                                          int64_t handle_value,
                                          uint32_t* out_index,
@@ -57,6 +82,23 @@ namespace
         if (table == NULL || out_index == NULL || out_entry == NULL)
         {
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_PROCESS);
+        }
+
+        if (try_decode_handle_table_pointer(table, handle_value, &index))
+        {
+            status = zaclr_handle_table_load_entry(table, index, out_entry);
+            if (status.status != ZACLR_STATUS_OK)
+            {
+                return status;
+            }
+
+            if (out_entry->handle == 0u)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_PROCESS);
+            }
+
+            *out_index = index;
+            return zaclr_result_ok();
         }
 
         if (!decode_handle_value(handle_value, &index))
@@ -198,8 +240,8 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::_Inter
                       ZACLR_TRACE_CATEGORY_INTEROP,
                       ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
                       "GCHandleAlloc.ReturnEncodedHandle",
-                      (uint64_t)encode_handle_index(index));
-    return zaclr_native_call_frame_set_i8(&frame, encode_handle_index(index));
+                      (uint64_t)(uintptr_t)&table->entries[index].handle);
+    return zaclr_native_call_frame_set_i8(&frame, (int64_t)(uintptr_t)&table->entries[index].handle);
 }
 
 struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::_InternalFree___STATIC__BOOLEAN__I(struct zaclr_native_call_frame& frame)
