@@ -12,6 +12,11 @@ struct zaclr_native_System_RuntimeTypeHandle
        FCALL (InternalCall), static, takes RuntimeType object, returns RuntimeAssembly or null.
        Reference: CLONES/runtime/src/coreclr/vm/runtimehandles.cpp:220 */
     static struct zaclr_result GetAssemblyIfExists___STATIC__CLASS_System_Reflection_RuntimeAssembly__CLASS_System_RuntimeType(struct zaclr_native_call_frame& frame);
+    /* CoreCLR: RuntimeTypeHandle.GetModuleIfExists(RuntimeType type) -> RuntimeModule?
+       FCALL (InternalCall), static, takes RuntimeType object, returns RuntimeModule or null. */
+    static struct zaclr_result GetModuleIfExists___STATIC__CLASS_System_Reflection_RuntimeModule__CLASS_System_RuntimeType(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result GetGCHandle___I__VALUETYPE_System_Runtime_InteropServices_GCHandleType(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result FreeGCHandle___I__I(struct zaclr_native_call_frame& frame);
 };
 
 #endif

@@ -282,7 +282,32 @@ namespace
 
         if (layout->element_type == ZACLR_ELEMENT_TYPE_VALUETYPE)
         {
-            return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
+            switch (layout->field_size)
+            {
+                case 1u:
+                case 2u:
+                case 4u:
+                case 8u:
+                    if (value->kind != ZACLR_STACK_VALUE_I4 && value->kind != ZACLR_STACK_VALUE_I8)
+                    {
+                        console_write("[ZACLR][object] valuetype store unsupported kind=");
+                        console_write_dec((uint64_t)value->kind);
+                        console_write(" field_size=");
+                        console_write_dec((uint64_t)layout->field_size);
+                        console_write(" element_type=");
+                        console_write_dec((uint64_t)layout->element_type);
+                        console_write("\n");
+                        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
+                    }
+                    break;
+                default:
+                    console_write("[ZACLR][object] valuetype store unsupported size=");
+                    console_write_dec((uint64_t)layout->field_size);
+                    console_write(" element_type=");
+                    console_write_dec((uint64_t)layout->element_type);
+                    console_write("\n");
+                    return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);
+            }
         }
 
         if (layout->is_reference != 0u)
@@ -1279,7 +1304,60 @@ extern "C" struct zaclr_result zaclr_object_load_field(struct zaclr_runtime* run
             return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
         }
 
-        return zaclr_reference_object_load_field((const struct zaclr_reference_object_desc*)object, token, out_value);
+        {
+            struct zaclr_result result = zaclr_reference_object_load_field((const struct zaclr_reference_object_desc*)object, token, out_value);
+            if (result.status == ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            if (object->header.method_table != NULL
+                && object->header.method_table->type_desc != NULL
+                && object->header.method_table->type_desc->type_namespace.text != NULL
+                && object->header.method_table->type_desc->type_name.text != NULL
+                && object->header.method_table->type_desc->type_namespace.text[0] == 'S'
+                && object->header.method_table->type_desc->type_namespace.text[1] == 'y'
+                && object->header.method_table->type_desc->type_namespace.text[2] == 's'
+                && object->header.method_table->type_desc->type_namespace.text[3] == 't'
+                && object->header.method_table->type_desc->type_namespace.text[4] == 'e'
+                && object->header.method_table->type_desc->type_namespace.text[5] == 'm'
+                && object->header.method_table->type_desc->type_namespace.text[6] == '.'
+                && object->header.method_table->type_desc->type_namespace.text[7] == 'R'
+                && object->header.method_table->type_desc->type_namespace.text[8] == 'e'
+                && object->header.method_table->type_desc->type_namespace.text[9] == 'f'
+                && object->header.method_table->type_desc->type_namespace.text[10] == 'l'
+                && object->header.method_table->type_desc->type_namespace.text[11] == 'e'
+                && object->header.method_table->type_desc->type_namespace.text[12] == 'c'
+                && object->header.method_table->type_desc->type_namespace.text[13] == 't'
+                && object->header.method_table->type_desc->type_namespace.text[14] == 'i'
+                && object->header.method_table->type_desc->type_namespace.text[15] == 'o'
+                && object->header.method_table->type_desc->type_namespace.text[16] == 'n'
+                && object->header.method_table->type_desc->type_namespace.text[17] == '\0'
+                && object->header.method_table->type_desc->type_name.text[0] == 'R'
+                && object->header.method_table->type_desc->type_name.text[1] == 'u'
+                && object->header.method_table->type_desc->type_name.text[2] == 'n'
+                && object->header.method_table->type_desc->type_name.text[3] == 't'
+                && object->header.method_table->type_desc->type_name.text[4] == 'i'
+                && object->header.method_table->type_desc->type_name.text[5] == 'm'
+                && object->header.method_table->type_desc->type_name.text[6] == 'e'
+                && object->header.method_table->type_desc->type_name.text[7] == 'A'
+                && object->header.method_table->type_desc->type_name.text[8] == 's'
+                && object->header.method_table->type_desc->type_name.text[9] == 's'
+                && object->header.method_table->type_desc->type_name.text[10] == 'e'
+                && object->header.method_table->type_desc->type_name.text[11] == 'm'
+                && object->header.method_table->type_desc->type_name.text[12] == 'b'
+                && object->header.method_table->type_desc->type_name.text[13] == 'l'
+                && object->header.method_table->type_desc->type_name.text[14] == 'y'
+                && object->header.method_table->type_desc->type_name.text[15] == '\0')
+            {
+                *out_value = {};
+                out_value->kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+                out_value->data.object_reference = (struct zaclr_object_desc*)object;
+                return zaclr_result_ok();
+            }
+
+            return result;
+        }
     }
 
     return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_HEAP);

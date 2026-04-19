@@ -94,6 +94,47 @@ namespace
         return false;
     }
 
+    static bool try_get_enum_underlying_element_type(const struct zaclr_loaded_assembly* assembly,
+                                                     const struct zaclr_type_desc* type_desc,
+                                                     uint8_t* out_element_type)
+    {
+        struct zaclr_field_row field_row = {};
+        struct zaclr_name_view field_name = {};
+        struct zaclr_slice field_signature = {};
+        struct zaclr_result result;
+
+        if (assembly == NULL || type_desc == NULL || out_element_type == NULL || type_desc->field_count == 0u)
+        {
+            return false;
+        }
+
+        result = zaclr_metadata_reader_get_field_row(&assembly->metadata, type_desc->field_list, &field_row);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return false;
+        }
+
+        result = zaclr_metadata_reader_get_string(&assembly->metadata, field_row.name_index, &field_name);
+        if (result.status != ZACLR_STATUS_OK || !text_equals(field_name.text, "value__"))
+        {
+            return false;
+        }
+
+        result = zaclr_metadata_reader_get_blob(&assembly->metadata, field_row.signature_blob_index, &field_signature);
+        if (result.status != ZACLR_STATUS_OK || field_signature.data == NULL || field_signature.size < 2u)
+        {
+            return false;
+        }
+
+        if (field_signature.data[0] != 0x06u)
+        {
+            return false;
+        }
+
+        *out_element_type = field_signature.data[1];
+        return true;
+    }
+
     static struct zaclr_result resolve_parent_method_table(struct zaclr_runtime* runtime,
                                                            struct zaclr_loaded_assembly* assembly,
                                                            const struct zaclr_type_desc* type_desc,
@@ -387,16 +428,43 @@ namespace
                     goto cleanup_error;
                 }
 
-                if (nested_method_table == NULL || nested_method_table->instance_size < ZACLR_OBJECT_HEADER_SIZE)
+                if (nested_method_table == NULL)
                 {
                     result = zaclr_result_make(ZACLR_STATUS_BAD_STATE, ZACLR_STATUS_CATEGORY_METADATA);
                     goto cleanup_error;
                 }
 
-                field_size = nested_method_table->instance_size - ZACLR_OBJECT_HEADER_SIZE;
-                alignment = nested_method_table->field_alignment_requirement != 0u
-                    ? nested_method_table->field_alignment_requirement
-                    : 1u;
+                if (zaclr_method_table_is_enum(nested_method_table) != 0u)
+                {
+                    uint8_t enum_underlying_element_type = 0u;
+                    if (!try_get_enum_underlying_element_type((struct zaclr_loaded_assembly*)nested_assembly,
+                                                              nested_type,
+                                                              &enum_underlying_element_type))
+                    {
+                        result = zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
+                        goto cleanup_error;
+                    }
+
+                    field_size = zaclr_field_layout_size_from_element_type(enum_underlying_element_type);
+                    if (field_size == 0u)
+                    {
+                        field_size = 4u;
+                    }
+                    alignment = zaclr_field_layout_compute_alignment(enum_underlying_element_type);
+                }
+                else
+                {
+                    if (nested_method_table->instance_size < ZACLR_OBJECT_HEADER_SIZE)
+                    {
+                        result = zaclr_result_make(ZACLR_STATUS_BAD_STATE, ZACLR_STATUS_CATEGORY_METADATA);
+                        goto cleanup_error;
+                    }
+
+                    field_size = nested_method_table->instance_size - ZACLR_OBJECT_HEADER_SIZE;
+                    alignment = nested_method_table->field_alignment_requirement != 0u
+                        ? nested_method_table->field_alignment_requirement
+                        : 1u;
+                }
             }
             else
             {

@@ -158,6 +158,27 @@ internal static partial class ConformanceTests
             Pass("[PASS] ldtoken cross: ExTypeA is not ExTypeB");
         else
             Fail("[FAIL] ldtoken cross: ExTypeA is not ExTypeB");
+
+        System.Type t1 = typeof(ExTypeA);
+        System.Type t2 = typeof(ExTypeA);
+        System.Type t3 = typeof(ExTypeB);
+
+        if (t1 == t2)
+            Pass("[PASS] RuntimeTypeHandle cache: typeof same type stable");
+        else
+            Fail("[FAIL] RuntimeTypeHandle cache: typeof same type stable");
+
+        if (t1 != t3)
+            Pass("[PASS] RuntimeTypeHandle cache: typeof different types distinct");
+        else
+            Fail("[FAIL] RuntimeTypeHandle cache: typeof different types distinct");
+
+        System.ModuleHandle mh1 = t1.Module.ModuleHandle;
+        System.ModuleHandle mh2 = t2.Module.ModuleHandle;
+        if (mh1.Equals(mh2))
+            Pass("[PASS] RuntimeTypeHandle cache: module handle stable across repeated typeof");
+        else
+            Fail("[FAIL] RuntimeTypeHandle cache: module handle stable across repeated typeof");
     }
 }
 

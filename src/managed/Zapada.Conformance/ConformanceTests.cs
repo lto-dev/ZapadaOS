@@ -96,6 +96,7 @@ internal static partial class ConformanceTests
         TestGcBasic();
         TestGcHandleBasics();
         TestWeakHandleBasic();
+        TestLdtokenTypeIdentity();
         TestFinalizationBasics();
         TestSuppressFinalize();
         TestReRegisterForFinalize();

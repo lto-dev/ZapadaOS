@@ -6,6 +6,10 @@
 #include <kernel/zaclr/process/zaclr_handle_table.h>
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
 
+extern "C" {
+#include <kernel/console.h>
+}
+
 namespace
 {
     static const uint64_t k_handle_shift = 1u;
@@ -490,7 +494,35 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::Intern
     status = zaclr_native_call_frame_arg_i8(&frame, 0u, &handle_value);
     if (status.status != ZACLR_STATUS_OK)
     {
-        return status;
+        zaclr_object_handle boxed_handle = 0u;
+        struct zaclr_boxed_value_desc* boxed_value = NULL;
+
+        status = zaclr_native_call_frame_arg_object(&frame, 0u, &boxed_handle);
+        if (status.status != ZACLR_STATUS_OK)
+        {
+            return status;
+        }
+
+        boxed_value = frame.runtime != NULL
+            ? zaclr_boxed_value_from_handle(&frame.runtime->heap, boxed_handle)
+            : NULL;
+        if (boxed_value == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_PROCESS);
+        }
+
+        if (boxed_value->value.kind == ZACLR_STACK_VALUE_I8)
+        {
+            handle_value = boxed_value->value.data.i8;
+        }
+        else if (boxed_value->value.kind == ZACLR_STACK_VALUE_I4)
+        {
+            handle_value = boxed_value->value.data.i4;
+        }
+        else
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_PROCESS);
+        }
     }
 
     status = zaclr_native_call_frame_arg_object(&frame, 1u, &value);
@@ -500,6 +532,18 @@ struct zaclr_result zaclr_native_System_Runtime_InteropServices_GCHandle::Intern
     }
 
     status = zaclr_native_call_frame_arg_object(&frame, 2u, &old_value);
+    if (frame.runtime != NULL)
+    {
+        console_write("[ZACLR][gch-icx] handle_value=");
+        console_write_hex64((uint64_t)handle_value);
+        console_write(" arg1_obj=");
+        console_write_hex64((uint64_t)value);
+        console_write(" arg2_status=");
+        console_write_dec((uint64_t)status.status);
+        console_write(" arg2_cat=");
+        console_write_dec((uint64_t)status.category);
+        console_write("\n");
+    }
     if (status.status != ZACLR_STATUS_OK)
     {
         return status;

@@ -211,24 +211,46 @@ internal static partial class ConformanceTests
     {
         object value = new ExTypeA();
         GCHandle handle = GCHandle.Alloc(value, GCHandleType.Normal);
-
+ 
         if (handle.IsAllocated && handle.Target == value)
             Pass("[PASS] GCHandle normal alloc/target");
         else
             Fail("[FAIL] GCHandle normal alloc/target");
-
+ 
         object replacement = new ExTypeA();
         handle.Target = replacement;
         if (handle.Target == replacement)
             Pass("[PASS] GCHandle target set");
         else
             Fail("[FAIL] GCHandle target set");
-
+ 
+        object previous = handle.Target!;
+        object replacement2 = new ExTypeA();
+        handle.Target = replacement2;
+        if (previous == replacement && handle.Target == replacement2)
+            Pass("[PASS] GCHandle repeated target exchange");
+        else
+            Fail("[FAIL] GCHandle repeated target exchange");
+ 
+        System.Type typeA1 = typeof(ExTypeA);
+        System.Type typeA2 = typeof(ExTypeA);
+        GCHandle typeHandle = GCHandle.Alloc(typeA1, GCHandleType.Normal);
+        if (typeHandle.IsAllocated && object.ReferenceEquals(typeHandle.Target, typeA1) && object.ReferenceEquals(typeA2, typeA1))
+            Pass("[PASS] GCHandle works with RuntimeType handles");
+        else
+            Fail("[FAIL] GCHandle works with RuntimeType handles");
+ 
+        typeHandle.Target = typeA2;
+        if (object.ReferenceEquals(typeHandle.Target, typeA2))
+            Pass("[PASS] GCHandle retargets same RuntimeType cache object");
+        else
+            Fail("[FAIL] GCHandle retargets same RuntimeType cache object");
+ 
+        typeHandle.Free();
         handle.Free();
         Pass("[PASS] GCHandle free");
     }
-
-    internal static void TestWeakHandleBasic()
+internal static void TestWeakHandleBasic()
     {
         ExTypeA value = new ExTypeA();
         WeakGCHandle<ExTypeA> weak = new WeakGCHandle<ExTypeA>(value, false);
@@ -239,7 +261,7 @@ internal static partial class ConformanceTests
             Fail("[FAIL] WeakGCHandle target visible while alive");
 
         targetBeforeCollect = null;
-        value = null;
+        value = null!;
         InternalCalls.GcCollect();
 
         if (!weak.TryGetTarget(out ExTypeA? targetAfterCollect) || targetAfterCollect == null)

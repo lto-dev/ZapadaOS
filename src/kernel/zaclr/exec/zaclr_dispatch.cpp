@@ -4754,6 +4754,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             struct zaclr_stack_value field_value;
             struct zaclr_stack_value object_value;
             struct zaclr_object_desc* object;
+            const bool trace_runtime_type_cache_ctor = frame->method != NULL && frame->method->token.raw == 0x060007FFu;
             struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &field_value);
             if (result.status != ZACLR_STATUS_OK)
             {
@@ -4766,6 +4767,21 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
+            if (trace_runtime_type_cache_ctor)
+            {
+                console_write("[ZACLR][stfld] enter token=");
+                console_write_hex64((uint64_t)token.raw);
+                console_write(" il_offset=");
+                console_write_dec((uint64_t)frame->il_offset);
+                console_write(" obj_kind=");
+                console_write_dec((uint64_t)object_value.kind);
+                console_write(" field_kind=");
+                console_write_dec((uint64_t)field_value.kind);
+                console_write(" depth_after_pop=");
+                console_write_dec((uint64_t)frame->eval_stack.depth);
+                console_write("\n");
+            }
+
             if (object_value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS || object_value.kind == ZACLR_STACK_VALUE_BYREF)
             {
                 struct zaclr_stack_value* target = resolve_local_address_target(frame, &object_value);
@@ -4776,6 +4792,15 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 
                 if (target->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE)
                 {
+                    if (trace_runtime_type_cache_ctor)
+                    {
+                        console_write("[ZACLR][stfld] byref-direct-store token=");
+                        console_write_hex64((uint64_t)token.raw);
+                        console_write(" target_kind=");
+                        console_write_dec((uint64_t)target->kind);
+                        console_write("\n");
+                    }
+
                     frame->il_offset += 5u;
                     *target = field_value;
                     return zaclr_result_ok();
@@ -4787,7 +4812,33 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             result = stack_value_to_object_reference(frame->runtime, &object_value, &object);
             if (result.status != ZACLR_STATUS_OK)
             {
+                if (trace_runtime_type_cache_ctor)
+                {
+                    console_write("[ZACLR][stfld] object-resolve-failed token=");
+                    console_write_hex64((uint64_t)token.raw);
+                    console_write(" obj_kind=");
+                    console_write_dec((uint64_t)object_value.kind);
+                    console_write(" status=");
+                    console_write_dec((uint64_t)result.status);
+                    console_write(" category=");
+                    console_write_dec((uint64_t)result.category);
+                    console_write("\n");
+                }
+
                 return result;
+            }
+
+            if (trace_runtime_type_cache_ctor)
+            {
+                console_write("[ZACLR][stfld] object token=");
+                console_write_hex64((uint64_t)token.raw);
+                console_write(" flags=");
+                console_write_hex64((uint64_t)zaclr_object_flags(object));
+                console_write(" type_id=");
+                console_write_dec((uint64_t)object->type_id);
+                console_write(" method_table=");
+                console_write_hex64((uint64_t)(uintptr_t)object->header.method_table);
+                console_write("\n");
             }
 
             if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_MEMBERREF))
@@ -4807,6 +4858,17 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                                                &target_field_row);
                 if (result.status != ZACLR_STATUS_OK)
                 {
+                    if (trace_runtime_type_cache_ctor)
+                    {
+                        console_write("[ZACLR][stfld] memberref-resolve-failed token=");
+                        console_write_hex64((uint64_t)token.raw);
+                        console_write(" status=");
+                        console_write_dec((uint64_t)result.status);
+                        console_write(" category=");
+                        console_write_dec((uint64_t)result.category);
+                        console_write("\n");
+                    }
+
                     return result;
                 }
 
@@ -4814,7 +4876,19 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             frame->il_offset += 5u;
-            return store_object_field(frame->runtime, object, token, &field_value);
+            result = store_object_field(frame->runtime, object, token, &field_value);
+            if (trace_runtime_type_cache_ctor || result.status != ZACLR_STATUS_OK)
+            {
+                console_write("[ZACLR][stfld] store token=");
+                console_write_hex64((uint64_t)token.raw);
+                console_write(" status=");
+                console_write_dec((uint64_t)result.status);
+                console_write(" category=");
+                console_write_dec((uint64_t)result.category);
+                console_write("\n");
+            }
+
+            return result;
         }
 
         case CEE_LDFLD:

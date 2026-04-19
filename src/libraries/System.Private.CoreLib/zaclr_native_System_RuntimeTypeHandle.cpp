@@ -4,6 +4,10 @@
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
 #include <kernel/zaclr/typesystem/zaclr_type_identity.h>
 
+extern "C" {
+#include <kernel/console.h>
+}
+
 namespace
 {
     static struct zaclr_result load_runtime_type_handle_argument(struct zaclr_native_call_frame& frame,
@@ -171,4 +175,90 @@ struct zaclr_result zaclr_native_System_RuntimeTypeHandle::GetAssemblyIfExists__
     }
 
     return zaclr_native_call_frame_set_object(&frame, assembly_handle);
+}
+
+/* CoreCLR: RuntimeTypeHandle.GetModuleIfExists(RuntimeType type) -> RuntimeModule?
+   The immediate caller falls back to QCall GetModuleSlow if this returns null.
+   ZACLR currently has no managed RuntimeModule object surface, but GetModule() only
+   needs a module whose RuntimeModule.get_RuntimeType() returns the declaring type's
+   RuntimeType. Returning the existing RuntimeAssembly object preserves forward motion
+   for the current interpreter slice because both RuntimeAssembly and RuntimeModule are
+   managed wrappers around the owning native assembly/module concept. */
+struct zaclr_result zaclr_native_System_RuntimeTypeHandle::GetModuleIfExists___STATIC__CLASS_System_Reflection_RuntimeModule__CLASS_System_RuntimeType(struct zaclr_native_call_frame& frame)
+{
+    zaclr_object_handle type_handle = 0u;
+    const struct zaclr_runtime_type_desc* runtime_type = NULL;
+    zaclr_object_handle assembly_handle = 0u;
+    struct zaclr_result result;
+
+    console_write("[ZACLR][rtth] compiled GetModuleIfExists reached\n");
+
+    result = load_runtime_type_handle_argument(frame, 0u, &runtime_type, &type_handle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (runtime_type == NULL || runtime_type->type_assembly == NULL)
+    {
+        return zaclr_native_call_frame_set_object(&frame, 0u);
+    }
+
+    result = zaclr_runtime_assembly_get_or_create(&frame.runtime->heap,
+                                                   (struct zaclr_loaded_assembly*)runtime_type->type_assembly,
+                                                   &assembly_handle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return zaclr_native_call_frame_set_object(&frame, 0u);
+    }
+
+    return zaclr_native_call_frame_set_object(&frame, assembly_handle);
+}
+
+struct zaclr_result zaclr_native_System_RuntimeTypeHandle::GetGCHandle___I__VALUETYPE_System_Runtime_InteropServices_GCHandleType(struct zaclr_native_call_frame& frame)
+{
+    zaclr_object_handle runtime_type_handle = 0u;
+    const struct zaclr_runtime_type_desc* runtime_type = NULL;
+    int32_t handle_kind = 0;
+    uint32_t index = 0u;
+    struct zaclr_handle_table* table;
+    struct zaclr_result result;
+
+    result = load_runtime_type_handle_argument(frame, 0u, &runtime_type, &runtime_type_handle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_native_call_frame_arg_i4(&frame, 1u, &handle_kind);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    table = frame.runtime != NULL ? &frame.runtime->boot_launch.handle_table : NULL;
+    if (table == NULL || runtime_type_handle == 0u)
+    {
+        return zaclr_native_call_frame_set_i8(&frame, 0);
+    }
+
+    result = zaclr_handle_table_store_ex(table, runtime_type_handle, (uint32_t)handle_kind, &index);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_native_call_frame_set_i8(&frame, (int64_t)(uintptr_t)&table->entries[index].handle);
+}
+
+struct zaclr_result zaclr_native_System_RuntimeTypeHandle::FreeGCHandle___I__I(struct zaclr_native_call_frame& frame)
+{
+    int64_t handle_value = 0;
+    struct zaclr_result result = zaclr_native_call_frame_arg_i8(&frame, 0u, &handle_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_native_call_frame_set_i8(&frame, handle_value);
 }
