@@ -476,6 +476,6 @@ if ($Arch -eq "aarch64") {
 # --------------------------------------------------------------------------
 if ($Run) {
     Write-Host "Launching QEMU..." -ForegroundColor Cyan
-    & .\run.ps1 -Arch $Arch -TimeoutSec 1500
+    & .\run.ps1 -Arch $Arch -TimeoutSec 500
 }
 

@@ -17,6 +17,42 @@ extern "C" {
 
 namespace
 {
+    static bool is_memberinfo_get_module_intrinsic(const struct zaclr_type_desc* type,
+                                                   const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && zaclr_text_equals(type->type_namespace.text, "System.Reflection")
+            && zaclr_text_equals(type->type_name.text, "MemberInfo")
+            && zaclr_text_equals(method->name.text, "get_Module")
+            && method->signature.parameter_count == 0u
+            && (method->signature.calling_convention & 0x20u) != 0u;
+    }
+
+    static struct zaclr_result invoke_memberinfo_get_module_intrinsic(struct zaclr_frame* frame)
+    {
+        struct zaclr_stack_value this_value = {};
+        struct zaclr_stack_value module_value = {};
+
+        if (frame == NULL || frame->argument_count == 0u || frame->arguments == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        this_value = frame->arguments[0];
+        if (this_value.kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE || this_value.data.object_reference == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        module_value.kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+        module_value.data.object_reference = this_value.data.object_reference;
+        return zaclr_eval_stack_push(&frame->eval_stack, &module_value);
+    }
+
     /* RuntimeHelpers intrinsics reference map for future ZACLR bring-up:
        - CoreCLR managed declaration + [Intrinsic] marker:
          CLONES/runtime/src/coreclr/System.Private.CoreLib/src/System/Runtime/CompilerServices/RuntimeHelpers.CoreCLR.cs
@@ -1036,6 +1072,11 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
     if (is_monitor_enter_intrinsic(effective_type, method))
     {
         return invoke_monitor_enter_intrinsic(frame);
+    }
+
+    if (is_memberinfo_get_module_intrinsic(effective_type, method))
+    {
+        return invoke_memberinfo_get_module_intrinsic(frame);
     }
 
     return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);

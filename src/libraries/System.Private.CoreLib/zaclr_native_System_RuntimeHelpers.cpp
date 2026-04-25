@@ -83,32 +83,71 @@ struct zaclr_result zaclr_native_System_RuntimeHelpers::ReflectionInvocation_Run
             const void* payload = zaclr_stack_value_payload_const(arg0);
             if (payload != NULL)
             {
-                /* CoreCLR QCallTypeHandle layout:
-                   field0 = void* _ptr
-                   field1 = native int _handle
+                /* Observed ZACLR QCallTypeHandle flow for RunClassConstructor:
+                   - the managed ctor receives RuntimeType.GetUnderlyingNativeHandle()
+                   - the resulting 16-byte valuetype reaches this QCall with the
+                     first pointer-sized slot populated and the second slot zeroed
 
-                   ZACLR's current CoreLib native convention already treats the
-                   RuntimeType native handle as a casted zaclr_object_handle, see:
-                   - RuntimeTypeHandle::ToIntPtr
-                   - System.Type::GetTypeFromHandleUnsafe
+                   Accept both layouts defensively:
+                   1) first slot contains the RuntimeType native/object handle
+                   2) second slot contains the handle (older assumption) */
+                uintptr_t native_type_handle_slot0 = 0u;
+                uintptr_t native_type_handle_slot1 = 0u;
 
-                   So use the same convention here instead of introducing a second
-                   incompatible translation model. */
-                uintptr_t native_type_handle = 0u;
-                if (arg0->payload_size >= sizeof(void*) + sizeof(uintptr_t))
+                if (arg0->payload_size >= sizeof(uintptr_t))
                 {
-                    kernel_memcpy(&native_type_handle,
-                                  (const uint8_t*)payload + sizeof(void*),
-                                  sizeof(native_type_handle));
+                    kernel_memcpy(&native_type_handle_slot0,
+                                  payload,
+                                  sizeof(native_type_handle_slot0));
                 }
 
-                console_write("[ZACLR][runtimehelpers] valuetype payload native_handle=");
-                console_write_hex64((uint64_t)native_type_handle);
+                if (arg0->payload_size >= sizeof(void*) + sizeof(uintptr_t))
+                {
+                    kernel_memcpy(&native_type_handle_slot1,
+                                  (const uint8_t*)payload + sizeof(void*),
+                                  sizeof(native_type_handle_slot1));
+                }
+
+                console_write("[ZACLR][runtimehelpers] valuetype payload slot0=");
+                console_write_hex64((uint64_t)native_type_handle_slot0);
+                console_write(" slot1=");
+                console_write_hex64((uint64_t)native_type_handle_slot1);
                 console_write(" current_cached_handle=");
                 console_write_hex64((uint64_t)runtime_type_handle);
                 console_write("\n");
 
-                runtime_type_handle = (zaclr_object_handle)native_type_handle;
+                runtime_type_handle = (zaclr_object_handle)(native_type_handle_slot0 != 0u
+                    ? native_type_handle_slot0
+                    : native_type_handle_slot1);
+
+                if (runtime_type_handle != 0u && frame.runtime != NULL)
+                {
+                    const struct zaclr_runtime_type_desc* direct_runtime_type =
+                        zaclr_runtime_type_from_handle_const(&frame.runtime->heap, runtime_type_handle);
+                    if (direct_runtime_type == NULL || direct_runtime_type->type_assembly == NULL)
+                    {
+                        zaclr_object_handle resolved_native_handle = 0u;
+                        struct zaclr_result native_lookup_result =
+                            zaclr_runtime_type_find_by_native_handle(frame.runtime,
+                                                                     (uintptr_t)runtime_type_handle,
+                                                                     &resolved_native_handle);
+                        if (native_lookup_result.status == ZACLR_STATUS_OK && resolved_native_handle != 0u)
+                        {
+                            runtime_type_handle = resolved_native_handle;
+                        }
+                        else
+                        {
+                            struct zaclr_object_desc* runtime_type_object =
+                                (struct zaclr_object_desc*)(uintptr_t)runtime_type_handle;
+                            zaclr_object_handle translated_handle =
+                                zaclr_heap_get_object_handle(&frame.runtime->heap, runtime_type_object);
+                            if (translated_handle != 0u)
+                            {
+                                runtime_type_handle = translated_handle;
+                            }
+                        }
+                    }
+                }
             }
         }
         else if (arg0->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)

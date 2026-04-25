@@ -262,3 +262,26 @@ struct zaclr_result zaclr_native_System_RuntimeTypeHandle::FreeGCHandle___I__I(s
 
     return zaclr_native_call_frame_set_i8(&frame, handle_value);
 }
+
+struct zaclr_result zaclr_native_System_RuntimeTypeHandle::get_Module___CLASS_System_Reflection_Module(struct zaclr_native_call_frame& frame)
+{
+    zaclr_object_handle value = 0u;
+    struct zaclr_result result = zaclr_native_call_frame_arg_object(&frame, 0u, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_native_call_frame_set_object(&frame, value);
+}
+
+struct zaclr_result zaclr_native_System_RuntimeTypeHandle::get_ModuleHandle___VALUETYPE_System_ModuleHandle(struct zaclr_native_call_frame& frame)
+{
+    return zaclr_native_call_frame_set_i8(&frame, 0);
+}
+
+struct zaclr_result zaclr_native_System_RuntimeTypeHandle::Equals___BOOLEAN__VALUETYPE_System_ModuleHandle(struct zaclr_native_call_frame& frame)
+{
+    (void)frame;
+    return zaclr_native_call_frame_set_bool(&frame, true);
+}

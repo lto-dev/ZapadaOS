@@ -17,6 +17,9 @@ struct zaclr_native_System_RuntimeTypeHandle
     static struct zaclr_result GetModuleIfExists___STATIC__CLASS_System_Reflection_RuntimeModule__CLASS_System_RuntimeType(struct zaclr_native_call_frame& frame);
     static struct zaclr_result GetGCHandle___I__VALUETYPE_System_Runtime_InteropServices_GCHandleType(struct zaclr_native_call_frame& frame);
     static struct zaclr_result FreeGCHandle___I__I(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result get_Module___CLASS_System_Reflection_Module(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result get_ModuleHandle___VALUETYPE_System_ModuleHandle(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result Equals___BOOLEAN__VALUETYPE_System_ModuleHandle(struct zaclr_native_call_frame& frame);
 };
 
 #endif

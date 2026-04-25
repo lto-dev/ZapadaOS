@@ -39,6 +39,34 @@ namespace
                                     assembly->static_field_count,
                                     ZACLR_GC_ROOT_FLAG_STATIC,
                                     visitor);
+
+        if (visitor->visit_object_reference != NULL)
+        {
+            if (assembly->runtime_type_cache != NULL)
+            {
+                for (uint32_t index = 0u; index < assembly->runtime_type_cache_count; ++index)
+                {
+                    struct zaclr_object_desc* object = zaclr_heap_get_object(NULL, assembly->runtime_type_cache[index]);
+                    if (object != NULL)
+                    {
+                        visitor->visit_object_reference(&object,
+                                                        ZACLR_GC_ROOT_FLAG_STATIC,
+                                                        visitor->context);
+                    }
+                }
+            }
+
+            if (assembly->exposed_assembly_handle != 0u)
+            {
+                struct zaclr_object_desc* object = zaclr_heap_get_object(NULL, assembly->exposed_assembly_handle);
+                if (object != NULL)
+                {
+                    visitor->visit_object_reference(&object,
+                                                    ZACLR_GC_ROOT_FLAG_STATIC,
+                                                    visitor->context);
+                }
+            }
+        }
     }
 
     static void zaclr_gc_enumerate_handle_table_roots(struct zaclr_handle_table* handle_table,

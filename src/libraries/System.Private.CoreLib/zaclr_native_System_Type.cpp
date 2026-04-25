@@ -111,3 +111,30 @@ struct zaclr_result zaclr_native_System_Type::GetTypeFromHandleUnsafe___STATIC__
 
     return zaclr_native_call_frame_set_object(&frame, handle);
 }
+
+struct zaclr_result zaclr_native_System_Type::get_Module___INSTANCE__CLASS_System_Reflection_Module(struct zaclr_native_call_frame& frame)
+{
+    zaclr_object_handle handle = 0u;
+    const struct zaclr_runtime_type_desc* runtime_type = NULL;
+    zaclr_object_handle assembly_handle = 0u;
+    struct zaclr_result result = get_runtime_type_from_this(frame, &handle, &runtime_type);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (runtime_type == NULL || runtime_type->type_assembly == NULL)
+    {
+        return zaclr_native_call_frame_set_object(&frame, 0u);
+    }
+
+    result = zaclr_runtime_assembly_get_or_create(&frame.runtime->heap,
+                                                   (struct zaclr_loaded_assembly*)runtime_type->type_assembly,
+                                                   &assembly_handle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_native_call_frame_set_object(&frame, assembly_handle);
+}

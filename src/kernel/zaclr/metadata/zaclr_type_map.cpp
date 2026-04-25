@@ -2,6 +2,10 @@
 
 #include <kernel/support/kernel_memory.h>
 
+extern "C" {
+#include <kernel/console.h>
+}
+
 namespace
 {
     static bool text_equals(const char* left, const char* right)
@@ -132,6 +136,25 @@ extern "C" struct zaclr_result zaclr_type_map_initialize(struct zaclr_type_map* 
         types[type_index].first_method_index = row.method_list > 0u ? (row.method_list - 1u) : 0u;
         types[type_index].method_count = next_method_list > row.method_list ? (next_method_list - row.method_list) : 0u;
         types[type_index].flags = row.flags;
+        if (type_namespace.text != NULL
+            && type_name.text != NULL
+            && text_equals(type_namespace.text, "System")
+            && text_equals(type_name.text, "ModuleHandle"))
+        {
+            console_write("[ZACLR][typemap] System.ModuleHandle field_list=");
+            console_write_dec((uint64_t)row.field_list);
+            console_write(" next_field_list=");
+            console_write_dec((uint64_t)next_field_list);
+            console_write(" field_count=");
+            console_write_dec((uint64_t)types[type_index].field_count);
+            console_write(" method_list=");
+            console_write_dec((uint64_t)row.method_list);
+            console_write(" next_method_list=");
+            console_write_dec((uint64_t)next_method_list);
+            console_write(" method_count=");
+            console_write_dec((uint64_t)types[type_index].method_count);
+            console_write("\n");
+        }
         if (type_namespace.text != NULL
             && type_name.text != NULL
             && text_equals(type_namespace.text, "System")

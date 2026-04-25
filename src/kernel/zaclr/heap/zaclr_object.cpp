@@ -240,8 +240,10 @@ namespace
                 return reference_data((struct zaclr_reference_object_desc*)object);
 
             case ZACLR_OBJECT_FAMILY_STRING:
-            case ZACLR_OBJECT_FAMILY_RUNTIME_TYPE:
                 return ((uint8_t*)object) + sizeof(struct zaclr_object_desc);
+
+            case ZACLR_OBJECT_FAMILY_RUNTIME_TYPE:
+                return ((uint8_t*)object) + sizeof(struct zaclr_runtime_type_desc);
 
             default:
                 return NULL;
@@ -732,6 +734,7 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* he
     struct zaclr_method_table* method_table = NULL;
     const struct zaclr_type_desc* runtime_type_desc = NULL;
     const struct zaclr_loaded_assembly* corelib = NULL;
+    size_t allocation_size = sizeof(struct zaclr_runtime_type_desc);
 
     if (heap == NULL || out_runtime_type == NULL)
     {
@@ -779,9 +782,14 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* he
         ? (zaclr_type_id)zaclr_token_row(&runtime_type_desc->token)
         : 0u;
 
+    if (method_table != NULL && method_table->instance_size > ZACLR_OBJECT_HEADER_SIZE)
+    {
+        allocation_size += (size_t)(method_table->instance_size - ZACLR_OBJECT_HEADER_SIZE);
+    }
+
     *out_runtime_type = NULL;
     result = zaclr_heap_allocate_object(heap,
-                                        sizeof(struct zaclr_runtime_type_desc),
+                                        allocation_size,
                                         object_assembly,
                                         runtime_type_id,
                                         ZACLR_OBJECT_FAMILY_RUNTIME_TYPE,
@@ -1181,9 +1189,9 @@ extern "C" struct zaclr_result zaclr_boxed_value_store_field(struct zaclr_runtim
 }
 
 extern "C" struct zaclr_result zaclr_object_store_field(struct zaclr_runtime* runtime,
-                                                          struct zaclr_object_desc* object,
-                                                          struct zaclr_token token,
-                                                          const struct zaclr_stack_value* value)
+                                                           struct zaclr_object_desc* object,
+                                                           struct zaclr_token token,
+                                                           const struct zaclr_stack_value* value)
 {
     if (runtime == NULL || value == NULL || !zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_FIELD))
     {
@@ -1202,6 +1210,19 @@ extern "C" struct zaclr_result zaclr_object_store_field(struct zaclr_runtime* ru
 
     if ((zaclr_object_flags(object) & ZACLR_OBJECT_FLAG_REFERENCE_TYPE) != 0u)
     {
+        if (zaclr_object_family(object) == ZACLR_OBJECT_FAMILY_STRING
+            || zaclr_object_family(object) == ZACLR_OBJECT_FAMILY_RUNTIME_TYPE)
+        {
+            const struct zaclr_field_layout* layout = find_field_layout(object, token);
+            void* address = object_instance_field_address(object, token);
+            if (layout != NULL && address != NULL)
+            {
+                return store_field_value(address, layout, value);
+            }
+
+            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
         return zaclr_reference_object_store_field((struct zaclr_reference_object_desc*)object, token, value);
     }
 

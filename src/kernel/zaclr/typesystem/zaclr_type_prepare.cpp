@@ -326,6 +326,20 @@ namespace
             {
                 ++instance_count;
             }
+
+            if (type_desc->type_namespace.text != NULL
+                && type_desc->type_name.text != NULL
+                && text_equals(type_desc->type_namespace.text, "System")
+                && text_equals(type_desc->type_name.text, "ModuleHandle"))
+            {
+                console_write("[ZACLR][typeprep] ModuleHandle firstpass field_row=");
+                console_write_dec((uint64_t)field_row);
+                console_write(" flags=");
+                console_write_hex64((uint64_t)row.flags);
+                console_write(" classified_static=");
+                console_write_dec((uint64_t)(((row.flags & FIELD_FLAG_STATIC) != 0u) ? 1u : 0u));
+                console_write("\n");
+            }
         }
 
         /* Allocate instance field layouts */
@@ -393,6 +407,22 @@ namespace
                 goto cleanup_error;
             }
 
+            if (type_desc->type_namespace.text != NULL
+                && type_desc->type_name.text != NULL
+                && text_equals(type_desc->type_namespace.text, "System")
+                && text_equals(type_desc->type_name.text, "ModuleHandle"))
+            {
+                console_write("[ZACLR][typeprep] ModuleHandle secondpass field_row=");
+                console_write_dec((uint64_t)field_row);
+                console_write(" flags=");
+                console_write_hex64((uint64_t)row.flags);
+                console_write(" elem_type=");
+                console_write_hex64((uint64_t)sig_type.element_type);
+                console_write(" token=");
+                console_write_hex64((uint64_t)sig_type.type_token.raw);
+                console_write("\n");
+            }
+
             element_type = sig_type.element_type;
             is_ref = zaclr_field_layout_is_reference(element_type);
             if (element_type == ZACLR_ELEMENT_TYPE_VALUETYPE)
@@ -434,7 +464,13 @@ namespace
                     goto cleanup_error;
                 }
 
-                if (zaclr_method_table_is_enum(nested_method_table) != 0u)
+                if ((row.flags & FIELD_FLAG_STATIC) != 0u
+                    && nested_method_table->preparation_state != ZACLR_MT_PREP_COMPLETE)
+                {
+                    field_size = 0u;
+                    alignment = 1u;
+                }
+                else if (zaclr_method_table_is_enum(nested_method_table) != 0u)
                 {
                     uint8_t enum_underlying_element_type = 0u;
                     if (!try_get_enum_underlying_element_type((struct zaclr_loaded_assembly*)nested_assembly,
