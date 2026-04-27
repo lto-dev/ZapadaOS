@@ -11,6 +11,27 @@ extern "C" {
 
 namespace
 {
+    static bool text_equals(const char* left, const char* right)
+    {
+        if (left == NULL || right == NULL)
+        {
+            return false;
+        }
+
+        while (*left != '\0' && *right != '\0')
+        {
+            if (*left != *right)
+            {
+                return false;
+            }
+
+            ++left;
+            ++right;
+        }
+
+        return *left == *right;
+    }
+
     static void append_text(char* buffer, size_t capacity, size_t* length, const char* text)
     {
         size_t index = 0u;
@@ -712,6 +733,30 @@ extern "C" struct zaclr_result zaclr_frame_bind_arguments(struct zaclr_frame* fr
     console_write(" caller_depth=");
     console_write_dec((uint64_t)caller_stack->depth);
     console_write("\n");
+
+    if (frame->method != NULL
+        && frame->method->name.text != NULL
+        && frame->assembly != NULL
+        && frame->assembly->assembly_name.text != NULL
+        && text_equals(frame->assembly->assembly_name.text, "System.Private.CoreLib")
+        && text_equals(frame->method->name.text, "Equals"))
+    {
+        console_write("[ZACLR][bind-equals] owner_token=");
+        console_write_hex64((uint64_t)frame->method->owning_type_token.raw);
+        console_write(" method_token=");
+        console_write_hex64((uint64_t)frame->method->token.raw);
+        console_write(" callconv=");
+        console_write_hex64((uint64_t)frame->method->signature.calling_convention);
+        console_write(" param_count=");
+        console_write_dec((uint64_t)frame->method->signature.parameter_count);
+        console_write(" method_flags=");
+        console_write_hex64((uint64_t)frame->method->method_flags);
+        console_write(" frame_arg_count=");
+        console_write_dec((uint64_t)frame->argument_count);
+        console_write(" caller_depth=");
+        console_write_dec((uint64_t)caller_stack->depth);
+        console_write("\n");
+    }
 
     if (caller_stack->depth < frame->argument_count)
     {

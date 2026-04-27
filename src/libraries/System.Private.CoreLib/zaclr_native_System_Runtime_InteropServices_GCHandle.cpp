@@ -96,14 +96,9 @@ namespace
                 return status;
             }
 
-            if (out_entry->handle == 0u)
-            {
-                return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_PROCESS);
-            }
-
-            *out_index = index;
-            return zaclr_result_ok();
-        }
+        *out_index = index;
+        return zaclr_result_ok();
+}
 
         if (!decode_handle_value(handle_value, &index))
         {
@@ -128,14 +123,9 @@ namespace
             return status;
         }
 
-        if (out_entry->handle == 0u)
-        {
-            return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_PROCESS);
-        }
-
         *out_index = index;
         return zaclr_result_ok();
-    }
+}
 
     static void update_pinned_state(struct zaclr_native_call_frame& frame,
                                     const struct zaclr_gc_handle_entry* old_entry,

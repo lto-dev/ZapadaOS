@@ -8,6 +8,7 @@
 #include "../../../libraries/System.Private.CoreLib/zaclr_native_System_GC.h"
 #include "../../../libraries/System.Private.CoreLib/zaclr_native_System_Runtime_InteropServices_GCHandle.h"
 #include "../../../libraries/System.Private.CoreLib/zaclr_native_System_RuntimeHelpers.h"
+#include "../../../libraries/System.Private.CoreLib/zaclr_native_System_RuntimeTypeHandle.h"
 
 extern "C" {
 #include <kernel/console.h>
@@ -155,6 +156,54 @@ extern "C" struct zaclr_result zaclr_runtime_initialize(struct zaclr_runtime* ru
     result = zaclr_qcall_table_register(&runtime->qcall_table,
                                         "ReflectionInvocation_RunClassConstructor",
                                         zaclr_native_System_RuntimeHelpers::ReflectionInvocation_RunClassConstructor___STATIC__VOID__VALUETYPE);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_qcall_table_register(&runtime->qcall_table,
+                                        "QCall_GetGCHandleForTypeHandle",
+                                        zaclr_native_System_RuntimeTypeHandle::QCall_GetGCHandleForTypeHandle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_qcall_table_register(&runtime->qcall_table,
+                                        "QCall_FreeGCHandleForTypeHandle",
+                                        zaclr_native_System_RuntimeTypeHandle::QCall_FreeGCHandleForTypeHandle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_qcall_table_register(&runtime->qcall_table,
+                                        "RuntimeTypeHandle_GetRuntimeTypeFromHandleSlow",
+                                        zaclr_native_System_RuntimeTypeHandle::RuntimeTypeHandle_GetRuntimeTypeFromHandleSlow___STATIC__VOID__I__VALUETYPE_System_Runtime_CompilerServices_ObjectHandleOnStack);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_qcall_table_register(&runtime->qcall_table,
+                                        "TypeHandle_GetCorElementType",
+                                        zaclr_native_System_RuntimeTypeHandle::QCall_TypeHandle_GetCorElementType);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_qcall_table_register(&runtime->qcall_table,
+                                        "RuntimeTypeHandle_GetDeclaringTypeHandle",
+                                        zaclr_native_System_RuntimeTypeHandle::QCall_RuntimeTypeHandle_GetDeclaringTypeHandle);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_qcall_table_register(&runtime->qcall_table,
+                                        "RuntimeTypeHandle_ConstructName",
+                                        zaclr_native_System_RuntimeTypeHandle::QCall_RuntimeTypeHandle_ConstructName);
     if (result.status != ZACLR_STATUS_OK)
     {
         return result;

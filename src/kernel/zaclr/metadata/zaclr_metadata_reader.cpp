@@ -422,8 +422,8 @@ extern "C" uint32_t zaclr_metadata_reader_get_row_count(const struct zaclr_metad
 }
 
 extern "C" struct zaclr_result zaclr_metadata_reader_get_assembly_row(const struct zaclr_metadata_reader* reader,
-                                                                       uint32_t row_1based,
-                                                                       struct zaclr_assembly_row* row)
+                                                                        uint32_t row_1based,
+                                                                        struct zaclr_assembly_row* row)
 {
     const struct zaclr_metadata_table_view* table;
     const uint8_t* p;
@@ -447,6 +447,31 @@ extern "C" struct zaclr_result zaclr_metadata_reader_get_assembly_row(const stru
     row->public_key_blob_index = read_heap_index(reader, &p, 0x04u);
     row->name_index = read_heap_index(reader, &p, 0x01u);
     row->culture_index = read_heap_index(reader, &p, 0x01u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_module_row(const struct zaclr_metadata_reader* reader,
+                                                                      uint32_t row_1based,
+                                                                      struct zaclr_module_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x00u];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->generation = read_u16(p); p += 2u;
+    row->name_index = read_heap_index(reader, &p, 0x01u);
+    row->mvid_index = read_heap_index(reader, &p, 0x02u);
+    row->enc_id_index = read_heap_index(reader, &p, 0x02u);
+    row->enc_base_id_index = read_heap_index(reader, &p, 0x02u);
     return zaclr_result_ok();
 }
 
@@ -530,9 +555,255 @@ extern "C" struct zaclr_result zaclr_metadata_reader_get_methoddef_row(const str
     return zaclr_result_ok();
 }
 
-extern "C" struct zaclr_result zaclr_metadata_reader_get_assemblyref_row(const struct zaclr_metadata_reader* reader,
+extern "C" struct zaclr_result zaclr_metadata_reader_get_param_row(const struct zaclr_metadata_reader* reader,
+                                                                    uint32_t row_1based,
+                                                                    struct zaclr_param_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x08u];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->flags = read_u16(p); p += 2u;
+    row->sequence = read_u16(p); p += 2u;
+    row->name_index = read_heap_index(reader, &p, 0x01u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_memberref_row(const struct zaclr_metadata_reader* reader,
+                                                                        uint32_t row_1based,
+                                                                        struct zaclr_memberref_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+    static const uint8_t member_ref_parent_tables[] = { 0x02u, 0x01u, 0x1Au, 0x06u, 0x1Bu };
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x0Au];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->class_coded_index = coded_index_size(reader, member_ref_parent_tables, 5u, 3u) == 4u ? read_u32(p) : read_u16(p);
+    p += coded_index_size(reader, member_ref_parent_tables, 5u, 3u);
+    row->name_index = read_heap_index(reader, &p, 0x01u);
+    row->signature_blob_index = read_heap_index(reader, &p, 0x04u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_constant_row(const struct zaclr_metadata_reader* reader,
+                                                                       uint32_t row_1based,
+                                                                       struct zaclr_constant_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+    static const uint8_t has_constant_tables[] = { 0x04u, 0x08u, 0x17u };
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x0Bu];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->type = read_u16(p); p += 2u;
+    row->parent_coded_index = coded_index_size(reader, has_constant_tables, 3u, 2u) == 4u ? read_u32(p) : read_u16(p);
+    p += coded_index_size(reader, has_constant_tables, 3u, 2u);
+    row->value_blob_index = read_heap_index(reader, &p, 0x04u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_customattribute_row(const struct zaclr_metadata_reader* reader,
+                                                                              uint32_t row_1based,
+                                                                              struct zaclr_customattribute_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+    static const uint8_t has_custom_attribute_tables[] = {
+        0x06u, 0x04u, 0x01u, 0x02u, 0x08u, 0x09u, 0x0Au, 0x00u,
+        0x0Eu, 0x17u, 0x14u, 0x11u, 0x1Au, 0x1Bu, 0x20u, 0x23u,
+        0x26u, 0x27u, 0x2Au, 0x2Cu, 0x2Bu
+    };
+    static const uint8_t custom_attribute_type_tables[] = { 0x06u, 0x0Au };
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x0Cu];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->parent_coded_index = coded_index_size(reader, has_custom_attribute_tables, 21u, 5u) == 4u ? read_u32(p) : read_u16(p);
+    p += coded_index_size(reader, has_custom_attribute_tables, 21u, 5u);
+    row->type_coded_index = coded_index_size(reader, custom_attribute_type_tables, 2u, 3u) == 4u ? read_u32(p) : read_u16(p);
+    p += coded_index_size(reader, custom_attribute_type_tables, 2u, 3u);
+    row->value_blob_index = read_heap_index(reader, &p, 0x04u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_fieldmarshal_row(const struct zaclr_metadata_reader* reader,
                                                                            uint32_t row_1based,
-                                                                           struct zaclr_assemblyref_row* row)
+                                                                           struct zaclr_fieldmarshal_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+    static const uint8_t has_field_marshal_tables[] = { 0x04u, 0x08u };
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x0Du];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->parent_coded_index = coded_index_size(reader, has_field_marshal_tables, 2u, 1u) == 4u ? read_u32(p) : read_u16(p);
+    p += coded_index_size(reader, has_field_marshal_tables, 2u, 1u);
+    row->native_type_blob_index = read_heap_index(reader, &p, 0x04u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_classlayout_row(const struct zaclr_metadata_reader* reader,
+                                                                          uint32_t row_1based,
+                                                                          struct zaclr_classlayout_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x0Fu];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->packing_size = read_u16(p); p += 2u;
+    row->class_size = read_u32(p); p += 4u;
+    row->parent = table_index_size(reader, 0x02u) == 4u ? read_u32(p) : read_u16(p);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_fieldlayout_row(const struct zaclr_metadata_reader* reader,
+                                                                          uint32_t row_1based,
+                                                                          struct zaclr_fieldlayout_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x10u];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->offset = read_u32(p); p += 4u;
+    row->field = table_index_size(reader, 0x04u) == 4u ? read_u32(p) : read_u16(p);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_event_row(const struct zaclr_metadata_reader* reader,
+                                                                    uint32_t row_1based,
+                                                                    struct zaclr_event_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+    static const uint8_t typedef_or_ref_tables[] = { 0x02u, 0x01u, 0x1Bu };
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x14u];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->flags = read_u16(p); p += 2u;
+    row->name_index = read_heap_index(reader, &p, 0x01u);
+    row->event_type_coded_index = coded_index_size(reader, typedef_or_ref_tables, 3u, 2u) == 4u ? read_u32(p) : read_u16(p);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_property_row(const struct zaclr_metadata_reader* reader,
+                                                                       uint32_t row_1based,
+                                                                       struct zaclr_property_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x17u];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->flags = read_u16(p); p += 2u;
+    row->name_index = read_heap_index(reader, &p, 0x01u);
+    row->type_blob_index = read_heap_index(reader, &p, 0x04u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_genericparam_row(const struct zaclr_metadata_reader* reader,
+                                                                           uint32_t row_1based,
+                                                                           struct zaclr_genericparam_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+    static const uint8_t type_or_method_def_tables[] = { 0x02u, 0x06u };
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x2Au];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->number = read_u16(p); p += 2u;
+    row->flags = read_u16(p); p += 2u;
+    row->owner_coded_index = coded_index_size(reader, type_or_method_def_tables, 2u, 1u) == 4u ? read_u32(p) : read_u16(p);
+    p += coded_index_size(reader, type_or_method_def_tables, 2u, 1u);
+    row->name_index = read_heap_index(reader, &p, 0x01u);
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_metadata_reader_get_assemblyref_row(const struct zaclr_metadata_reader* reader,
+                                                                            uint32_t row_1based,
+                                                                            struct zaclr_assemblyref_row* row)
 {
     const struct zaclr_metadata_table_view* table;
     const uint8_t* p;
@@ -704,8 +975,31 @@ extern "C" struct zaclr_result zaclr_metadata_reader_get_methodspec_row(const st
     return zaclr_result_ok();
 }
 
+extern "C" struct zaclr_result zaclr_metadata_reader_get_nestedclass_row(const struct zaclr_metadata_reader* reader,
+                                                                          uint32_t row_1based,
+                                                                          struct zaclr_nestedclass_row* row)
+{
+    const struct zaclr_metadata_table_view* table;
+    const uint8_t* p;
+
+    if (reader == NULL || row == NULL) {
+        return invalid_argument();
+    }
+
+    table = &reader->tables[0x29u];
+    if (row_1based == 0u || row_1based > table->row_count || table->rows == NULL) {
+        return bad_metadata();
+    }
+
+    p = table->rows + (row_1based - 1u) * table->row_size;
+    row->nested_class = table_index_size(reader, 0x02u) == 4u ? read_u32(p) : read_u16(p);
+    p += table_index_size(reader, 0x02u);
+    row->enclosing_class = table_index_size(reader, 0x02u) == 4u ? read_u32(p) : read_u16(p);
+    return zaclr_result_ok();
+}
+
 extern "C" struct zaclr_result zaclr_metadata_reader_get_assembly_name(const struct zaclr_metadata_reader* reader,
-                                                                        struct zaclr_name_view* assembly_name)
+                                                                         struct zaclr_name_view* assembly_name)
 {
     if (reader == NULL || assembly_name == NULL) {
         return invalid_argument();

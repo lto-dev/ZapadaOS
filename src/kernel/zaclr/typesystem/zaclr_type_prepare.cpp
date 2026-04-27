@@ -53,6 +53,23 @@ namespace
         return true;
     }
 
+    static bool virtual_slot_matches_method(const struct zaclr_method_desc* slot,
+                                            const struct zaclr_method_desc* method)
+    {
+        if (slot == NULL
+            || method == NULL
+            || slot->name.text == NULL
+            || method->name.text == NULL
+            || !text_equals(slot->name.text, method->name.text))
+        {
+            return false;
+        }
+
+        return slot->signature.parameter_count == method->signature.parameter_count
+            && slot->signature.generic_parameter_count == method->signature.generic_parameter_count
+            && ((slot->signature.calling_convention & SIG_CONV_HASTHIS) == (method->signature.calling_convention & SIG_CONV_HASTHIS));
+    }
+
     static bool extends_well_known_type(struct zaclr_runtime* /* runtime */,
                                         const struct zaclr_loaded_assembly* assembly,
                                         const struct zaclr_type_desc* type_desc,
@@ -678,16 +695,13 @@ namespace
             }
             else
             {
-                /* Override: find matching parent slot by name */
+                /* Override: find matching parent slot by name and signature shape. */
                 uint32_t slot_index;
                 bool found = false;
 
                 for (slot_index = 0u; slot_index < parent_slot_count; ++slot_index)
                 {
-                    if (vtable[slot_index] != NULL
-                        && vtable[slot_index]->name.text != NULL
-                        && method->name.text != NULL
-                        && text_equals(vtable[slot_index]->name.text, method->name.text))
+                    if (virtual_slot_matches_method(vtable[slot_index], method))
                     {
                         vtable[slot_index] = method;
                         found = true;

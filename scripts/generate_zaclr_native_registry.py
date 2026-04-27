@@ -194,6 +194,8 @@ def main() -> int:
         type_namespace, type_name = decode_wrapper_type_name(wrapper_name)
         for method_match in re.finditer(r'static\s+struct\s+zaclr_result\s+([A-Za-z0-9_]+)\s*\(', text):
             method_name = method_match.group(1)
+            if '___' not in method_name:
+                continue
             managed_name, signature_suffix = method_name.split('___', 1)
             if managed_name == '_ctor':
                 managed_name = '.ctor'

@@ -12,6 +12,9 @@ struct zaclr_native_System_String
     static struct zaclr_result Concat___STATIC__STRING__STRING__STRING(
         struct zaclr_native_call_frame& frame);
 
+    static struct zaclr_result FastAllocateString___STATIC__STRING__PTR_VALUETYPE_System_Runtime_CompilerServices_MethodTable__I(
+        struct zaclr_native_call_frame& frame);
+
     static struct zaclr_result get_Length___I4(
         struct zaclr_native_call_frame& frame);
 

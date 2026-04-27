@@ -491,6 +491,98 @@ namespace
         console_write("\n");
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
     }
+
+    static struct zaclr_result resolve_named_instance_field_token(const struct zaclr_loaded_assembly* assembly,
+                                                                  const struct zaclr_type_desc* type_desc,
+                                                                  const char* field_name,
+                                                                  struct zaclr_token* out_token)
+    {
+        uint32_t field_index;
+        struct zaclr_result result;
+
+        if (assembly == NULL || type_desc == NULL || field_name == NULL || out_token == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        *out_token = zaclr_token_make(0u);
+        if (zaclr_token_matches_table(&type_desc->extends, ZACLR_TOKEN_TABLE_TYPEDEF))
+        {
+            const struct zaclr_type_desc* base_type = zaclr_type_map_find_by_token(&assembly->type_map, type_desc->extends);
+            if (base_type != NULL)
+            {
+                result = resolve_named_instance_field_token(assembly, base_type, field_name, out_token);
+                if (result.status == ZACLR_STATUS_OK)
+                {
+                    return result;
+                }
+            }
+        }
+
+        for (field_index = 0u; field_index < type_desc->field_count; ++field_index)
+        {
+            uint32_t field_row = type_desc->field_list + field_index;
+            struct zaclr_field_row row = {};
+            struct zaclr_name_view resolved_name = {};
+            result = zaclr_metadata_reader_get_field_row(&assembly->metadata, field_row, &row);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            result = zaclr_metadata_reader_get_string(&assembly->metadata, row.name_index, &resolved_name);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            if ((row.flags & k_field_flag_static) == 0u
+                && resolved_name.text != NULL
+                && zaclr_text_equals(resolved_name.text, field_name))
+            {
+                *out_token = zaclr_token_make(((uint32_t)ZACLR_TOKEN_TABLE_FIELD << 24) | field_row);
+                return zaclr_result_ok();
+            }
+        }
+
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_HEAP);
+    }
+
+    static struct zaclr_result initialize_runtime_type_managed_handle(struct zaclr_runtime* runtime,
+                                                                      struct zaclr_runtime_type_desc* runtime_type)
+    {
+        struct zaclr_token handle_field_token;
+        struct zaclr_stack_value handle_value = {};
+        const struct zaclr_method_table* method_table;
+        struct zaclr_result result;
+
+        if (runtime == NULL || runtime_type == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_HEAP);
+        }
+
+        method_table = runtime_type->object.header.method_table;
+        if (method_table == NULL || method_table->assembly == NULL || method_table->type_desc == NULL)
+        {
+            return zaclr_result_ok();
+        }
+
+        result = resolve_named_instance_field_token(method_table->assembly,
+                                                    method_table->type_desc,
+                                                    "m_handle",
+                                                    &handle_field_token);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        handle_value.kind = ZACLR_STACK_VALUE_I8;
+        handle_value.data.i8 = (int64_t)runtime_type->native_type_handle;
+        return zaclr_object_store_field(runtime,
+                                        &runtime_type->object,
+                                        handle_field_token,
+                                        &handle_value);
+    }
 }
 
 extern "C" uint32_t zaclr_object_flags(const struct zaclr_object_desc* object)
@@ -804,6 +896,15 @@ extern "C" struct zaclr_result zaclr_runtime_type_allocate(struct zaclr_heap* he
     runtime_type->type_assembly = type_assembly;
     runtime_type->type_token = type_token;
     runtime_type->native_type_handle = (uintptr_t)&runtime_type->object;
+    if (heap->runtime != NULL)
+    {
+        result = initialize_runtime_type_managed_handle(heap->runtime, runtime_type);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+    }
+
     *out_runtime_type = runtime_type;
     return zaclr_result_ok();
 }

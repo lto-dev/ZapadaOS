@@ -1,5 +1,6 @@
 #include <kernel/zaclr/exec/zaclr_intrinsics.h>
 
+#include <kernel/support/kernel_memory.h>
 #include <kernel/zaclr/diag/zaclr_trace_events.h>
 #include <kernel/zaclr/exec/zaclr_dispatch_helpers.h>
 #include <kernel/zaclr/exec/zaclr_eval_stack.h>
@@ -7,8 +8,11 @@
 #include <kernel/zaclr/heap/zaclr_gc_roots.h>
 #include <kernel/zaclr/heap/zaclr_heap.h>
 #include <kernel/zaclr/heap/zaclr_object.h>
+#include <kernel/zaclr/metadata/zaclr_metadata_reader.h>
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
+#include <kernel/zaclr/typesystem/zaclr_field_layout.h>
 #include <kernel/zaclr/typesystem/zaclr_method_table.h>
+#include <kernel/zaclr/typesystem/zaclr_type_prepare.h>
 #include <kernel/zaclr/typesystem/zaclr_type_system.h>
 
 extern "C" {
@@ -111,6 +115,22 @@ namespace
         return zaclr_eval_stack_push(&frame->eval_stack, &stack_value);
     }
 
+    static struct zaclr_result push_r4(struct zaclr_frame* frame, uint32_t bits)
+    {
+        struct zaclr_stack_value stack_value = {};
+        stack_value.kind = ZACLR_STACK_VALUE_R4;
+        stack_value.data.r4_bits = bits;
+        return zaclr_eval_stack_push(&frame->eval_stack, &stack_value);
+    }
+
+    static struct zaclr_result push_r8(struct zaclr_frame* frame, uint64_t bits)
+    {
+        struct zaclr_stack_value stack_value = {};
+        stack_value.kind = ZACLR_STACK_VALUE_R8;
+        stack_value.data.r8_bits = bits;
+        return zaclr_eval_stack_push(&frame->eval_stack, &stack_value);
+    }
+
     static struct zaclr_result push_object_reference(struct zaclr_frame* frame,
                                                      struct zaclr_object_desc* value)
     {
@@ -118,6 +138,371 @@ namespace
         stack_value.kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
         stack_value.data.object_reference = value;
         return zaclr_eval_stack_push(&frame->eval_stack, &stack_value);
+    }
+
+    static uint32_t stack_value_scalar_width(const struct zaclr_stack_value* value)
+    {
+        if (value == NULL)
+        {
+            return 0u;
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I8 || value->kind == ZACLR_STACK_VALUE_R8)
+        {
+            return 8u;
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I4 || value->kind == ZACLR_STACK_VALUE_R4)
+        {
+            return 4u;
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+        {
+            return (uint32_t)sizeof(void*);
+        }
+
+        if (value->payload_size != 0u && value->payload_size <= 8u)
+        {
+            return value->payload_size;
+        }
+
+        return 0u;
+    }
+
+    static struct zaclr_result raw_address_from_stack_value(struct zaclr_frame* frame,
+                                                            const struct zaclr_stack_value* value,
+                                                            uintptr_t* out_address,
+                                                            uint32_t* out_payload_size,
+                                                            uint32_t* out_type_token_raw)
+    {
+        struct zaclr_stack_value mutable_value = {};
+        struct zaclr_stack_value* target;
+        void* payload;
+        uint32_t width;
+
+        if (out_address == NULL || out_payload_size == NULL || out_type_token_raw == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        *out_address = 0u;
+        *out_payload_size = 0u;
+        *out_type_token_raw = 0u;
+        if (value == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_BYREF)
+        {
+            if ((value->flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) == 0u)
+            {
+                *out_address = value->data.raw;
+                *out_payload_size = value->payload_size;
+                *out_type_token_raw = value->type_token_raw;
+                return zaclr_result_ok();
+            }
+
+            target = (struct zaclr_stack_value*)(uintptr_t)value->data.raw;
+            if (target == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            if (target->kind == ZACLR_STACK_VALUE_BYREF || target->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+            {
+                return raw_address_from_stack_value(frame,
+                                                    target,
+                                                    out_address,
+                                                    out_payload_size,
+                                                    out_type_token_raw);
+            }
+
+            if (target->kind == ZACLR_STACK_VALUE_VALUETYPE)
+            {
+                payload = zaclr_stack_value_payload(target);
+                if (payload == NULL)
+                {
+                    return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+                }
+
+                *out_address = (uintptr_t)payload;
+                *out_payload_size = target->payload_size;
+                *out_type_token_raw = target->type_token_raw;
+                return zaclr_result_ok();
+            }
+
+            width = stack_value_scalar_width(target);
+            if (width == 0u)
+            {
+                return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            *out_address = (uintptr_t)&target->data.raw;
+            *out_payload_size = width;
+            *out_type_token_raw = target->type_token_raw;
+            return zaclr_result_ok();
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+        {
+            target = resolve_local_address_target(frame, (struct zaclr_stack_value*)value);
+            if (target == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            if (target->kind == ZACLR_STACK_VALUE_BYREF || target->kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+            {
+                return raw_address_from_stack_value(frame,
+                                                    target,
+                                                    out_address,
+                                                    out_payload_size,
+                                                    out_type_token_raw);
+            }
+
+            mutable_value.kind = ZACLR_STACK_VALUE_BYREF;
+            mutable_value.flags = ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT;
+            mutable_value.data.raw = (uintptr_t)target;
+            return raw_address_from_stack_value(frame,
+                                                &mutable_value,
+                                                out_address,
+                                                out_payload_size,
+                                                out_type_token_raw);
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_VALUETYPE)
+        {
+            payload = zaclr_stack_value_payload((struct zaclr_stack_value*)value);
+            if (payload == NULL)
+            {
+                return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+            }
+
+            *out_address = (uintptr_t)payload;
+            *out_payload_size = value->payload_size;
+            *out_type_token_raw = value->type_token_raw;
+            return zaclr_result_ok();
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I8)
+        {
+            *out_address = (uintptr_t)value->data.i8;
+            *out_payload_size = value->payload_size;
+            *out_type_token_raw = value->type_token_raw;
+            return zaclr_result_ok();
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I4)
+        {
+            *out_address = (uintptr_t)(uint32_t)value->data.i4;
+            *out_payload_size = value->payload_size;
+            *out_type_token_raw = value->type_token_raw;
+            return zaclr_result_ok();
+        }
+
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    static const uint8_t* read_payload_from_stack_value(struct zaclr_frame* frame,
+                                                        const struct zaclr_stack_value* value,
+                                                        uint32_t* out_payload_size,
+                                                        uint32_t* out_type_token_raw)
+    {
+        uintptr_t address = 0u;
+        uint32_t payload_size = 0u;
+        uint32_t type_token_raw = 0u;
+        struct zaclr_result result = raw_address_from_stack_value(frame,
+                                                                  value,
+                                                                  &address,
+                                                                  &payload_size,
+                                                                  &type_token_raw);
+        if (result.status != ZACLR_STATUS_OK || address == 0u)
+        {
+            return NULL;
+        }
+
+        if (out_payload_size != NULL)
+        {
+            *out_payload_size = payload_size;
+        }
+
+        if (out_type_token_raw != NULL)
+        {
+            *out_type_token_raw = type_token_raw;
+        }
+
+        return (const uint8_t*)address;
+    }
+
+    static const struct zaclr_field_layout* find_instance_field_layout_by_name(struct zaclr_runtime* runtime,
+                                                                               const struct zaclr_loaded_assembly* assembly,
+                                                                               const struct zaclr_type_desc* type,
+                                                                               const char* field_name)
+    {
+        struct zaclr_method_table* method_table = NULL;
+        struct zaclr_result result;
+
+        if (runtime == NULL || assembly == NULL || type == NULL || field_name == NULL)
+        {
+            return NULL;
+        }
+
+        result = zaclr_type_prepare(runtime,
+                                    (struct zaclr_loaded_assembly*)assembly,
+                                    type,
+                                    &method_table);
+        if (result.status != ZACLR_STATUS_OK || method_table == NULL || method_table->instance_fields == NULL)
+        {
+            return NULL;
+        }
+
+        for (uint32_t index = 0u; index < method_table->instance_field_count; ++index)
+        {
+            const struct zaclr_field_layout* layout = &method_table->instance_fields[index];
+            struct zaclr_field_row field_row = {};
+            struct zaclr_name_view name = {};
+            if (layout->is_static != 0u)
+            {
+                continue;
+            }
+
+            if (zaclr_metadata_reader_get_field_row(&assembly->metadata,
+                                                    layout->field_token_row,
+                                                    &field_row).status != ZACLR_STATUS_OK
+                || zaclr_metadata_reader_get_string(&assembly->metadata,
+                                                    field_row.name_index,
+                                                    &name).status != ZACLR_STATUS_OK)
+            {
+                continue;
+            }
+
+            if (text_equals(name.text, field_name))
+            {
+                return layout;
+            }
+        }
+
+        return NULL;
+    }
+
+    static uint32_t numeric_width_from_element_type(uint8_t element_type)
+    {
+        switch (element_type)
+        {
+            case ZACLR_ELEMENT_TYPE_BOOLEAN:
+            case ZACLR_ELEMENT_TYPE_I1:
+            case ZACLR_ELEMENT_TYPE_U1:
+                return 1u;
+            case ZACLR_ELEMENT_TYPE_CHAR:
+            case ZACLR_ELEMENT_TYPE_I2:
+            case ZACLR_ELEMENT_TYPE_U2:
+                return 2u;
+            case ZACLR_ELEMENT_TYPE_I4:
+            case ZACLR_ELEMENT_TYPE_U4:
+            case ZACLR_ELEMENT_TYPE_R4:
+                return 4u;
+            case ZACLR_ELEMENT_TYPE_I:
+            case ZACLR_ELEMENT_TYPE_U:
+            case ZACLR_ELEMENT_TYPE_I8:
+            case ZACLR_ELEMENT_TYPE_U8:
+            case ZACLR_ELEMENT_TYPE_R8:
+                return 8u;
+            default:
+                return 0u;
+        }
+    }
+
+    static uint32_t numeric_width_from_stack_value(const struct zaclr_stack_value* value)
+    {
+        if (value == NULL)
+        {
+            return 0u;
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I8 || value->kind == ZACLR_STACK_VALUE_R8)
+        {
+            return 8u;
+        }
+
+        if (value->kind == ZACLR_STACK_VALUE_I4 || value->kind == ZACLR_STACK_VALUE_R4)
+        {
+            return 4u;
+        }
+
+        if (value->payload_size != 0u && value->payload_size <= 8u)
+        {
+            return value->payload_size;
+        }
+
+        return 0u;
+    }
+
+    static bool numeric_element_type_is_unsigned(uint8_t element_type)
+    {
+        switch (element_type)
+        {
+            case ZACLR_ELEMENT_TYPE_BOOLEAN:
+            case ZACLR_ELEMENT_TYPE_CHAR:
+            case ZACLR_ELEMENT_TYPE_U1:
+            case ZACLR_ELEMENT_TYPE_U2:
+            case ZACLR_ELEMENT_TYPE_U4:
+            case ZACLR_ELEMENT_TYPE_U8:
+            case ZACLR_ELEMENT_TYPE_U:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static uint64_t numeric_stack_value_bits(const struct zaclr_stack_value* value,
+                                             uint32_t width)
+    {
+        uint64_t bits = 0u;
+        const void* payload;
+
+        if (value == NULL)
+        {
+            return 0u;
+        }
+
+        switch (value->kind)
+        {
+            case ZACLR_STACK_VALUE_I8:
+                return (uint64_t)value->data.i8;
+            case ZACLR_STACK_VALUE_R8:
+                return value->data.r8_bits;
+            case ZACLR_STACK_VALUE_R4:
+                return (uint64_t)value->data.r4_bits;
+            case ZACLR_STACK_VALUE_I4:
+                return (uint64_t)(uint32_t)value->data.i4;
+            case ZACLR_STACK_VALUE_VALUETYPE:
+                payload = zaclr_stack_value_payload_const(value);
+                if (payload != NULL)
+                {
+                    kernel_memcpy(&bits, payload, value->payload_size < width ? value->payload_size : width);
+                }
+                return bits;
+            default:
+                return (uint64_t)value->data.raw;
+        }
+    }
+
+    static int64_t numeric_sign_extend(uint64_t bits,
+                                       uint32_t width)
+    {
+        switch (width)
+        {
+            case 1u:
+                return (int64_t)(int8_t)(uint8_t)bits;
+            case 2u:
+                return (int64_t)(int16_t)(uint16_t)bits;
+            case 4u:
+                return (int64_t)(int32_t)(uint32_t)bits;
+            default:
+                return (int64_t)bits;
+        }
     }
 
     static bool is_unsafe_as_intrinsic(const struct zaclr_type_desc* type,
@@ -165,15 +550,144 @@ namespace
     static bool is_vector_ishardwareaccelerated_intrinsic(const struct zaclr_type_desc* type,
                                                           const struct zaclr_method_desc* method)
     {
+        if (type == NULL
+            || method == NULL
+            || type->type_namespace.text == NULL
+            || type->type_name.text == NULL
+            || method->name.text == NULL
+            || !text_equals(method->name.text, "get_IsHardwareAccelerated")
+            || method->signature.parameter_count != 0u)
+        {
+            return false;
+        }
+
+        if (text_equals(type->type_namespace.text, "System.Numerics")
+            && text_equals(type->type_name.text, "Vector"))
+        {
+            return true;
+        }
+
+        if (!text_equals(type->type_namespace.text, "System.Runtime.Intrinsics"))
+        {
+            return false;
+        }
+
+        return text_equals(type->type_name.text, "Vector64")
+            || text_equals(type->type_name.text, "Vector128")
+            || text_equals(type->type_name.text, "Vector256")
+            || text_equals(type->type_name.text, "Vector512")
+            || text_equals(type->type_name.text, "ISimdVector`2");
+    }
+
+    static bool is_hardwareintrinsic_issupported_intrinsic(const struct zaclr_type_desc* type,
+                                                          const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && method->name.text != NULL
+            && text_equals(method->name.text, "get_IsSupported")
+            && method->signature.parameter_count == 0u
+            && (text_equals(type->type_namespace.text, "System.Runtime.Intrinsics.X86")
+                || text_equals(type->type_namespace.text, "System.Runtime.Intrinsics.Arm")
+                || text_equals(type->type_namespace.text, "System.Runtime.Intrinsics.Wasm"));
+    }
+
+    static bool is_inumberbase_isnegative_intrinsic(const struct zaclr_type_desc* type,
+                                                    const struct zaclr_method_desc* method)
+    {
         return type != NULL
             && method != NULL
             && type->type_namespace.text != NULL
             && type->type_name.text != NULL
             && method->name.text != NULL
             && text_equals(type->type_namespace.text, "System.Numerics")
-            && text_equals(type->type_name.text, "Vector")
-            && text_equals(method->name.text, "get_IsHardwareAccelerated")
-            && method->signature.parameter_count == 0u;
+            && text_equals(type->type_name.text, "INumberBase`1")
+            && text_equals(method->name.text, "IsNegative")
+            && method->signature.parameter_count == 1u;
+    }
+
+    static bool is_span_get_length_intrinsic(const struct zaclr_type_desc* type,
+                                             const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System")
+            && (text_equals(type->type_name.text, "Span`1")
+                || text_equals(type->type_name.text, "ReadOnlySpan`1"))
+            && text_equals(method->name.text, "get_Length")
+            && method->signature.parameter_count == 0u
+            && (method->signature.calling_convention & 0x20u) != 0u;
+    }
+
+    static bool is_memorymarshal_get_non_null_pinnable_reference_intrinsic(const struct zaclr_type_desc* type,
+                                                                           const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System.Runtime.InteropServices")
+            && text_equals(type->type_name.text, "MemoryMarshal")
+            && text_equals(method->name.text, "GetNonNullPinnableReference")
+            && method->signature.parameter_count == 1u;
+    }
+
+    static bool is_memorymarshal_get_reference_intrinsic(const struct zaclr_type_desc* type,
+                                                         const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System.Runtime.InteropServices")
+            && text_equals(type->type_name.text, "MemoryMarshal")
+            && text_equals(method->name.text, "GetReference")
+            && method->signature.parameter_count == 1u;
+    }
+
+    static bool is_bitconverter_bits_intrinsic(const struct zaclr_type_desc* type,
+                                               const struct zaclr_method_desc* method)
+    {
+        if (type == NULL
+            || method == NULL
+            || type->type_namespace.text == NULL
+            || type->type_name.text == NULL
+            || method->name.text == NULL
+            || !text_equals(type->type_namespace.text, "System")
+            || !text_equals(type->type_name.text, "BitConverter")
+            || method->signature.parameter_count != 1u)
+        {
+            return false;
+        }
+
+        return text_equals(method->name.text, "DoubleToInt64Bits")
+            || text_equals(method->name.text, "DoubleToUInt64Bits")
+            || text_equals(method->name.text, "Int32BitsToSingle")
+            || text_equals(method->name.text, "Int64BitsToDouble")
+            || text_equals(method->name.text, "SingleToInt32Bits")
+            || text_equals(method->name.text, "SingleToUInt32Bits")
+            || text_equals(method->name.text, "UInt32BitsToSingle")
+            || text_equals(method->name.text, "UInt64BitsToDouble");
+    }
+
+    static bool is_binaryprimitives_reverseendianness_intrinsic(const struct zaclr_type_desc* type,
+                                                                const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System.Buffers.Binary")
+            && text_equals(type->type_name.text, "BinaryPrimitives")
+            && text_equals(method->name.text, "ReverseEndianness")
+            && method->signature.parameter_count == 1u;
     }
 
     static bool is_runtimehelpers_getmethodtable_intrinsic(const struct zaclr_type_desc* type,
@@ -214,7 +728,7 @@ namespace
      * EqualityComparer<T> slow path, which is fully supported by ZACLR.
      */
     static bool is_runtimehelpers_isbitwiseequatable_intrinsic(const struct zaclr_type_desc* type,
-                                                               const struct zaclr_method_desc* method)
+                                                                const struct zaclr_method_desc* method)
     {
         return type != NULL
             && method != NULL
@@ -225,6 +739,48 @@ namespace
             && text_equals(type->type_name.text, "RuntimeHelpers")
             && text_equals(method->name.text, "IsBitwiseEquatable")
             && method->signature.parameter_count == 0u;
+    }
+
+    static bool is_runtimehelpers_isreferenceorcontainsreferences_intrinsic(const struct zaclr_type_desc* type,
+                                                                            const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System.Runtime.CompilerServices")
+            && text_equals(type->type_name.text, "RuntimeHelpers")
+            && text_equals(method->name.text, "IsReferenceOrContainsReferences")
+            && method->signature.parameter_count == 0u;
+    }
+
+    static bool is_runtimehelpers_isknownconstant_intrinsic(const struct zaclr_type_desc* type,
+                                                            const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System.Runtime.CompilerServices")
+            && text_equals(type->type_name.text, "RuntimeHelpers")
+            && text_equals(method->name.text, "IsKnownConstant")
+            && method->signature.parameter_count == 1u;
+    }
+
+    static bool is_gc_keepalive_intrinsic(const struct zaclr_type_desc* type,
+                                          const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System")
+            && text_equals(type->type_name.text, "GC")
+            && text_equals(method->name.text, "KeepAlive")
+            && method->signature.parameter_count == 1u;
     }
 
     static bool is_methodtable_hasfinalizer_intrinsic(const struct zaclr_type_desc* type,
@@ -255,17 +811,127 @@ namespace
             && method->signature.parameter_count == 0u;
     }
 
-    static bool is_interlocked_exchange_intrinsic(const struct zaclr_type_desc* type,
-                                                  const struct zaclr_method_desc* method)
+    static bool is_interlocked_method_named(const struct zaclr_type_desc* type,
+                                            const struct zaclr_method_desc* method,
+                                            const char* name)
     {
         return type != NULL
             && method != NULL
+            && name != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && method->signature.generic_parameter_count == 0u
+            && text_equals(type->type_namespace.text, "System.Threading")
+            && text_equals(type->type_name.text, "Interlocked")
+            && text_equals(method->name.text, name);
+    }
+
+    static bool is_interlocked_exchange_intrinsic(const struct zaclr_type_desc* type,
+                                                  const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "Exchange")
+            || is_interlocked_method_named(type, method, "Exchange32")
+            || is_interlocked_method_named(type, method, "Exchange64")
+            || is_interlocked_method_named(type, method, "ExchangeObject");
+    }
+
+    static bool is_interlocked_compareexchange_intrinsic(const struct zaclr_type_desc* type,
+                                                         const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "CompareExchange")
+            || is_interlocked_method_named(type, method, "CompareExchange32")
+            || is_interlocked_method_named(type, method, "CompareExchange64")
+            || is_interlocked_method_named(type, method, "CompareExchangeObject")
+            || is_interlocked_method_named(type, method, "CompareExchange32Pointer");
+    }
+
+    static bool is_interlocked_exchangeadd_intrinsic(const struct zaclr_type_desc* type,
+                                                     const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "ExchangeAdd")
+            || is_interlocked_method_named(type, method, "ExchangeAdd32")
+            || is_interlocked_method_named(type, method, "ExchangeAdd64");
+    }
+
+    static bool is_interlocked_add_intrinsic(const struct zaclr_type_desc* type,
+                                             const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "Add");
+    }
+
+    static bool is_interlocked_and_intrinsic(const struct zaclr_type_desc* type,
+                                             const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "And");
+    }
+
+    static bool is_interlocked_or_intrinsic(const struct zaclr_type_desc* type,
+                                            const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "Or");
+    }
+
+    static bool is_interlocked_increment_intrinsic(const struct zaclr_type_desc* type,
+                                                   const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "Increment");
+    }
+
+    static bool is_interlocked_decrement_intrinsic(const struct zaclr_type_desc* type,
+                                                   const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "Decrement");
+    }
+
+    static bool is_interlocked_read_intrinsic(const struct zaclr_type_desc* type,
+                                              const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "Read");
+    }
+
+    static bool is_interlocked_memorybarrier_intrinsic(const struct zaclr_type_desc* type,
+                                                       const struct zaclr_method_desc* method)
+    {
+        return is_interlocked_method_named(type, method, "MemoryBarrier")
+            && method->signature.parameter_count == 0u;
+    }
+
+    static bool is_volatile_method_named(const struct zaclr_type_desc* type,
+                                         const struct zaclr_method_desc* method,
+                                         const char* name)
+    {
+        return type != NULL
+            && method != NULL
+            && name != NULL
             && type->type_namespace.text != NULL
             && type->type_name.text != NULL
             && method->name.text != NULL
             && text_equals(type->type_namespace.text, "System.Threading")
-            && text_equals(type->type_name.text, "Interlocked")
-            && text_equals(method->name.text, "Exchange");
+            && text_equals(type->type_name.text, "Volatile")
+            && text_equals(method->name.text, name);
+    }
+
+    static bool is_volatile_read_intrinsic(const struct zaclr_type_desc* type,
+                                           const struct zaclr_method_desc* method)
+    {
+        return is_volatile_method_named(type, method, "Read")
+            && method->signature.parameter_count == 1u;
+    }
+
+    static bool is_volatile_write_intrinsic(const struct zaclr_type_desc* type,
+                                            const struct zaclr_method_desc* method)
+    {
+        return is_volatile_method_named(type, method, "Write")
+            && method->signature.parameter_count == 2u;
+    }
+
+    static bool is_volatile_barrier_intrinsic(const struct zaclr_type_desc* type,
+                                              const struct zaclr_method_desc* method)
+    {
+        return (is_volatile_method_named(type, method, "ReadBarrier")
+                || is_volatile_method_named(type, method, "WriteBarrier"))
+            && method->signature.parameter_count == 0u;
     }
 
     static bool is_gchandle_gethandlevalue_intrinsic(const struct zaclr_type_desc* type,
@@ -308,6 +974,21 @@ namespace
             && text_equals(type->type_name.text, "Monitor")
             && text_equals(method->name.text, "Enter")
             && method->signature.parameter_count == 2u;
+    }
+
+    static bool is_unsafe_named_intrinsic(const struct zaclr_type_desc* type,
+                                          const struct zaclr_method_desc* method,
+                                          const char* name)
+    {
+        return type != NULL
+            && method != NULL
+            && name != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System.Runtime.CompilerServices")
+            && text_equals(type->type_name.text, "Unsafe")
+            && text_equals(method->name.text, name);
     }
 }
 
@@ -448,6 +1129,205 @@ static struct zaclr_result invoke_unsafe_add_intrinsic(struct zaclr_frame* frame
     return zaclr_eval_stack_push(&frame->eval_stack, &byref_value);
 }
 
+static struct zaclr_result invoke_unsafe_byte_offset_intrinsic(struct zaclr_frame* frame,
+                                                               int64_t direction)
+{
+    struct zaclr_stack_value offset_value = {};
+    struct zaclr_stack_value byref_value = {};
+    uintptr_t address = 0u;
+    uint32_t payload_size = 0u;
+    uint32_t type_token_raw = 0u;
+    int64_t offset = 0;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &offset_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &byref_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (offset_value.kind == ZACLR_STACK_VALUE_I8)
+    {
+        offset = offset_value.data.i8;
+    }
+    else if (offset_value.kind == ZACLR_STACK_VALUE_I4)
+    {
+        offset = (int64_t)offset_value.data.i4;
+    }
+    else
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = raw_address_from_stack_value(frame, &byref_value, &address, &payload_size, &type_token_raw);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_stack_value_set_byref(&byref_value,
+                                       (void*)(uintptr_t)(address + (uintptr_t)(offset * direction)),
+                                       payload_size,
+                                       type_token_raw,
+                                       ZACLR_STACK_VALUE_FLAG_NONE).status == ZACLR_STATUS_OK
+        ? zaclr_eval_stack_push(&frame->eval_stack, &byref_value)
+        : zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+}
+
+static struct zaclr_result invoke_unsafe_are_same_or_offset_intrinsic(struct zaclr_frame* frame,
+                                                                      bool return_offset)
+{
+    struct zaclr_stack_value right = {};
+    struct zaclr_stack_value left = {};
+    uintptr_t right_address = 0u;
+    uintptr_t left_address = 0u;
+    uint32_t ignored_size = 0u;
+    uint32_t ignored_token = 0u;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &right);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &left);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = raw_address_from_stack_value(frame, &left, &left_address, &ignored_size, &ignored_token);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = raw_address_from_stack_value(frame, &right, &right_address, &ignored_size, &ignored_token);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return return_offset
+        ? push_i8(frame, (int64_t)(right_address - left_address))
+        : push_i4(frame, left_address == right_address ? 1 : 0);
+}
+
+static struct zaclr_result invoke_unsafe_nullref_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value value = {};
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_stack_value_set_byref(&value, NULL, 0u, 0u, ZACLR_STACK_VALUE_FLAG_NONE);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_eval_stack_push(&frame->eval_stack, &value);
+}
+
+static struct zaclr_result invoke_unsafe_isnullref_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value value = {};
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (value.kind == ZACLR_STACK_VALUE_BYREF && (value.flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) == 0u)
+    {
+        return push_i4(frame, value.data.raw == 0u ? 1 : 0);
+    }
+
+    return push_i4(frame, 0);
+}
+
+static struct zaclr_result invoke_unsafe_asref_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value value = {};
+    uintptr_t address = 0u;
+    uint32_t payload_size = 0u;
+    uint32_t type_token_raw = 0u;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (value.kind == ZACLR_STACK_VALUE_BYREF || value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS)
+    {
+        return zaclr_eval_stack_push(&frame->eval_stack, &value);
+    }
+
+    result = raw_address_from_stack_value(frame, &value, &address, &payload_size, &type_token_raw);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_stack_value_set_byref(&value,
+                                         (void*)address,
+                                         payload_size,
+                                         type_token_raw,
+                                         ZACLR_STACK_VALUE_FLAG_NONE);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_eval_stack_push(&frame->eval_stack, &value);
+}
+
+static struct zaclr_result invoke_unsafe_skipinit_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value ignored = {};
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    return zaclr_eval_stack_pop(&frame->eval_stack, &ignored);
+}
+
 static struct zaclr_result invoke_vector_ishardwareaccelerated_intrinsic(struct zaclr_frame* frame)
 {
     if (frame == NULL)
@@ -456,6 +1336,685 @@ static struct zaclr_result invoke_vector_ishardwareaccelerated_intrinsic(struct 
     }
 
     return push_i4(frame, 0);
+}
+
+static struct zaclr_result invoke_inumberbase_isnegative_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value value = {};
+    const struct zaclr_generic_argument* generic_argument;
+    uint32_t width = 0u;
+    uint64_t bits;
+    bool is_unsigned = false;
+    bool is_negative = false;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    generic_argument = zaclr_generic_context_get_method_argument(&frame->generic_context, 0u);
+    if (generic_argument != NULL)
+    {
+        width = numeric_width_from_element_type(generic_argument->element_type);
+        is_unsigned = numeric_element_type_is_unsigned(generic_argument->element_type);
+    }
+
+    if (width == 0u)
+    {
+        width = numeric_width_from_stack_value(&value);
+    }
+
+    if (width == 0u || width > 8u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    bits = numeric_stack_value_bits(&value, width);
+    if (!is_unsigned)
+    {
+        if (value.kind == ZACLR_STACK_VALUE_R4)
+        {
+            is_negative = (bits & 0x80000000ull) != 0u;
+        }
+        else if (value.kind == ZACLR_STACK_VALUE_R8)
+        {
+            is_negative = (bits & 0x8000000000000000ull) != 0u;
+        }
+        else
+        {
+            is_negative = numeric_sign_extend(bits, width) < 0;
+        }
+    }
+
+    return push_i4(frame, is_negative ? 1 : 0);
+}
+
+static struct zaclr_result try_read_span_payload(struct zaclr_frame* frame,
+                                                const struct zaclr_stack_value* value,
+                                                const struct zaclr_field_layout* reference_layout,
+                                                const struct zaclr_field_layout* length_layout,
+                                                const uint8_t** out_payload,
+                                                uint32_t* out_payload_size,
+                                                uint32_t* out_payload_type_token)
+{
+    const uint8_t* payload;
+    uint32_t payload_size = 0u;
+    uint32_t payload_type_token = 0u;
+
+    if (out_payload == NULL || out_payload_size == NULL || out_payload_type_token == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    *out_payload = NULL;
+    *out_payload_size = 0u;
+    *out_payload_type_token = 0u;
+
+    if (frame == NULL || value == NULL || length_layout == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    payload = read_payload_from_stack_value(frame, value, &payload_size, &payload_type_token);
+    if (payload != NULL
+        && payload_size >= (length_layout->byte_offset + length_layout->field_size)
+        && (reference_layout == NULL || payload_size >= (reference_layout->byte_offset + reference_layout->field_size)))
+    {
+        *out_payload = payload;
+        *out_payload_size = payload_size;
+        *out_payload_type_token = payload_type_token;
+        return zaclr_result_ok();
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_VALUETYPE)
+    {
+        payload = (const uint8_t*)zaclr_stack_value_payload_const(value);
+        payload_size = value->payload_size;
+        payload_type_token = value->type_token_raw;
+        if (payload != NULL
+            && payload_size >= (length_layout->byte_offset + length_layout->field_size)
+            && (reference_layout == NULL || payload_size >= (reference_layout->byte_offset + reference_layout->field_size)))
+        {
+            *out_payload = payload;
+            *out_payload_size = payload_size;
+            *out_payload_type_token = payload_type_token;
+            return zaclr_result_ok();
+        }
+    }
+
+    return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+}
+
+static bool try_get_span_length_from_split_stack_value(const struct zaclr_stack_value* value,
+                                                       int32_t* out_length)
+{
+    const struct zaclr_stack_value* target;
+
+    if (value == NULL || out_length == NULL)
+    {
+        return false;
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_I4)
+    {
+        *out_length = value->data.i4;
+        return true;
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_I8)
+    {
+        *out_length = (int32_t)value->data.i8;
+        return true;
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_BYREF
+        && (value->flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) != 0u
+        && value->data.raw != 0u)
+    {
+        target = (const struct zaclr_stack_value*)(uintptr_t)value->data.raw;
+        if (target->kind == ZACLR_STACK_VALUE_I4)
+        {
+            *out_length = target->data.i4;
+            return true;
+        }
+
+        if (target->kind == ZACLR_STACK_VALUE_I8)
+        {
+            *out_length = (int32_t)target->data.i8;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool try_get_span_reference_address_from_split_stack_value(struct zaclr_frame* frame,
+                                                                  const struct zaclr_stack_value* value,
+                                                                  uintptr_t* out_address)
+{
+    uintptr_t address = 0u;
+    uint32_t ignored_size = 0u;
+    uint32_t ignored_token = 0u;
+    struct zaclr_result result;
+
+    if (out_address == NULL)
+    {
+        return false;
+    }
+
+    *out_address = 0u;
+    if (value == NULL)
+    {
+        return false;
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_I8)
+    {
+        *out_address = (uintptr_t)value->data.i8;
+        return true;
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_I4)
+    {
+        *out_address = (uintptr_t)(uint32_t)value->data.i4;
+        return true;
+    }
+
+    result = raw_address_from_stack_value(frame, value, &address, &ignored_size, &ignored_token);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return false;
+    }
+
+    *out_address = address;
+    return true;
+}
+
+static struct zaclr_result try_push_split_span_reference(struct zaclr_frame* frame,
+                                                         const struct zaclr_stack_value* length_value,
+                                                         uint32_t payload_type_token,
+                                                         uint32_t payload_size,
+                                                         bool require_non_empty)
+{
+    struct zaclr_stack_value reference_value = {};
+    const struct zaclr_stack_value* reference_source = NULL;
+    struct zaclr_stack_value byref_value = {};
+    int32_t length = 0;
+    uintptr_t referenced_address = 0u;
+    bool pop_reference_from_eval_stack = false;
+    struct zaclr_result result;
+
+    if (frame == NULL || length_value == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (!try_get_span_length_from_split_stack_value(length_value, &length))
+    {
+        return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (frame->eval_stack.depth != 0u)
+    {
+        result = zaclr_eval_stack_peek(&frame->eval_stack, &reference_value);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        reference_source = &reference_value;
+        pop_reference_from_eval_stack = true;
+    }
+    else if (frame->argument_count != 0u && frame->arguments != NULL)
+    {
+        reference_source = &frame->arguments[0];
+    }
+    else
+    {
+        return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (require_non_empty && length == 0)
+    {
+        referenced_address = 1u;
+    }
+    else if (!try_get_span_reference_address_from_split_stack_value(frame, reference_source, &referenced_address))
+    {
+        return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_stack_value_set_byref(&byref_value,
+                                         (void*)referenced_address,
+                                         payload_size,
+                                         payload_type_token,
+                                         ZACLR_STACK_VALUE_FLAG_NONE);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (pop_reference_from_eval_stack)
+    {
+        result = zaclr_eval_stack_pop(&frame->eval_stack, &reference_value);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+    }
+
+    return zaclr_eval_stack_push(&frame->eval_stack, &byref_value);
+}
+
+static struct zaclr_result invoke_span_get_length_intrinsic(struct zaclr_frame* frame,
+                                                            const struct zaclr_loaded_assembly* assembly,
+                                                            const struct zaclr_type_desc* type)
+{
+    struct zaclr_stack_value receiver = {};
+    const struct zaclr_field_layout* length_layout;
+    const uint8_t* payload;
+    uint32_t payload_size = 0u;
+    uint32_t ignored_token = 0u;
+    int32_t length = 0;
+    struct zaclr_result result;
+
+    if (frame == NULL || assembly == NULL || type == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &receiver);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    length_layout = find_instance_field_layout_by_name(frame->runtime,
+                                                       assembly,
+                                                       type,
+                                                       "_length");
+    if (length_layout == NULL || length_layout->field_size == 0u || length_layout->field_size > sizeof(length))
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = try_read_span_payload(frame,
+                                   &receiver,
+                                   NULL,
+                                   length_layout,
+                                   &payload,
+                                   &payload_size,
+                                   &ignored_token);
+    if (result.status == ZACLR_STATUS_OK)
+    {
+        kernel_memcpy(&length, payload + length_layout->byte_offset, length_layout->field_size);
+        return push_i4(frame, length);
+    }
+
+    if (try_get_span_length_from_split_stack_value(&receiver, &length))
+    {
+        return push_i4(frame, length);
+    }
+
+    console_write("[ZACLR][span-len] failed receiver_kind=");
+    console_write_dec((uint64_t)receiver.kind);
+    console_write(" receiver_flags=");
+    console_write_hex64((uint64_t)receiver.flags);
+    console_write(" receiver_payload=");
+    console_write_dec((uint64_t)receiver.payload_size);
+    console_write(" receiver_type=");
+    console_write_hex64((uint64_t)receiver.type_token_raw);
+    console_write(" receiver_raw=");
+    console_write_hex64((uint64_t)receiver.data.raw);
+    if (receiver.kind == ZACLR_STACK_VALUE_BYREF
+        && (receiver.flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) != 0u
+        && receiver.data.raw != 0u)
+    {
+        const struct zaclr_stack_value* receiver_target = (const struct zaclr_stack_value*)(uintptr_t)receiver.data.raw;
+        console_write(" target_kind=");
+        console_write_dec((uint64_t)receiver_target->kind);
+        console_write(" target_flags=");
+        console_write_hex64((uint64_t)receiver_target->flags);
+        console_write(" target_payload=");
+        console_write_dec((uint64_t)receiver_target->payload_size);
+        console_write(" target_type=");
+        console_write_hex64((uint64_t)receiver_target->type_token_raw);
+        console_write(" target_raw=");
+        console_write_hex64((uint64_t)receiver_target->data.raw);
+    }
+    if (frame->argument_count != 0u && frame->arguments != NULL)
+    {
+        console_write(" arg0_kind=");
+        console_write_dec((uint64_t)frame->arguments[0].kind);
+        console_write(" arg0_flags=");
+        console_write_hex64((uint64_t)frame->arguments[0].flags);
+        console_write(" arg0_payload=");
+        console_write_dec((uint64_t)frame->arguments[0].payload_size);
+        console_write(" arg0_type=");
+        console_write_hex64((uint64_t)frame->arguments[0].type_token_raw);
+        console_write(" arg0_raw=");
+        console_write_hex64((uint64_t)frame->arguments[0].data.raw);
+    }
+    console_write(" stack_depth=");
+    console_write_dec((uint64_t)frame->eval_stack.depth);
+    console_write(" len_offset=");
+    console_write_dec((uint64_t)length_layout->byte_offset);
+    console_write(" len_size=");
+    console_write_dec((uint64_t)length_layout->field_size);
+    console_write(" payload_size=");
+    console_write_dec((uint64_t)payload_size);
+    console_write(" result=");
+    console_write_dec((uint64_t)result.status);
+    console_write("\n");
+
+    return result;
+}
+
+static struct zaclr_result invoke_memorymarshal_span_reference_intrinsic(
+    struct zaclr_frame* frame,
+    const struct zaclr_loaded_assembly* assembly,
+    const struct zaclr_method_desc* method,
+    bool require_non_empty)
+{
+    struct zaclr_stack_value receiver = {};
+    uint32_t original_depth = 0u;
+    struct zaclr_signature_type parameter_type = {};
+    const struct zaclr_loaded_assembly* span_assembly = NULL;
+    const struct zaclr_type_desc* span_type = NULL;
+    const struct zaclr_field_layout* reference_layout;
+    const struct zaclr_field_layout* length_layout;
+    const uint8_t* payload;
+    uint32_t payload_size = 0u;
+    uint32_t payload_type_token = 0u;
+    int32_t length = 0;
+    struct zaclr_stack_value byref_value = {};
+    struct zaclr_result result;
+
+    if (frame == NULL || assembly == NULL || method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    original_depth = frame->eval_stack.depth;
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &receiver);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_signature_read_method_parameter(&method->signature, 0u, &parameter_type);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_type_system_resolve_type_desc(assembly,
+                                                 frame->runtime,
+                                                 parameter_type.type_token,
+                                                 &span_assembly,
+                                                 &span_type);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (span_type == NULL
+        || span_type->type_namespace.text == NULL
+        || span_type->type_name.text == NULL
+        || !text_equals(span_type->type_namespace.text, "System")
+        || (!text_equals(span_type->type_name.text, "Span`1")
+            && !text_equals(span_type->type_name.text, "ReadOnlySpan`1")))
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    reference_layout = find_instance_field_layout_by_name(frame->runtime,
+                                                          span_assembly != NULL ? span_assembly : assembly,
+                                                          span_type,
+                                                          "_reference");
+    length_layout = find_instance_field_layout_by_name(frame->runtime,
+                                                       span_assembly != NULL ? span_assembly : assembly,
+                                                       span_type,
+                                                       "_length");
+    if (reference_layout == NULL
+        || length_layout == NULL
+        || reference_layout->field_size == 0u
+        || length_layout->field_size == 0u
+        || length_layout->field_size > sizeof(length))
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = try_read_span_payload(frame,
+                                   &receiver,
+                                   reference_layout,
+                                   length_layout,
+                                   &payload,
+                                   &payload_size,
+                                   &payload_type_token);
+    if (result.status != ZACLR_STATUS_OK && frame->argument_count != 0u && frame->arguments != NULL)
+    {
+        result = try_read_span_payload(frame,
+                                       &frame->arguments[0],
+                                       reference_layout,
+                                       length_layout,
+                                       &payload,
+                                       &payload_size,
+                                       &payload_type_token);
+    }
+
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        struct zaclr_result split_result = try_push_split_span_reference(frame,
+                                                                        &receiver,
+                                                                        payload_type_token,
+                                                                        reference_layout->field_size,
+                                                                        require_non_empty);
+        if (split_result.status == ZACLR_STATUS_OK)
+        {
+            return split_result;
+        }
+
+        if (frame->eval_stack.depth + 1u == original_depth)
+        {
+            (void)zaclr_eval_stack_push(&frame->eval_stack, &receiver);
+        }
+
+        return result;
+    }
+
+    kernel_memcpy(&length, payload + length_layout->byte_offset, length_layout->field_size);
+    if (require_non_empty && length == 0)
+    {
+        return zaclr_stack_value_set_byref(&byref_value,
+                                           (void*)(uintptr_t)1u,
+                                           reference_layout->field_size,
+                                           payload_type_token,
+                                           ZACLR_STACK_VALUE_FLAG_NONE).status == ZACLR_STATUS_OK
+            ? zaclr_eval_stack_push(&frame->eval_stack, &byref_value)
+            : zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    {
+        uintptr_t referenced_address = 0u;
+        kernel_memcpy(&referenced_address,
+                      payload + reference_layout->byte_offset,
+                      reference_layout->field_size < sizeof(referenced_address)
+                          ? reference_layout->field_size
+                          : sizeof(referenced_address));
+        result = zaclr_stack_value_set_byref(&byref_value,
+                                             (void*)referenced_address,
+                                             reference_layout->field_size,
+                                             payload_type_token,
+                                             ZACLR_STACK_VALUE_FLAG_NONE);
+    }
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_eval_stack_push(&frame->eval_stack, &byref_value);
+}
+
+static struct zaclr_result invoke_memorymarshal_get_non_null_pinnable_reference_intrinsic(
+    struct zaclr_frame* frame,
+    const struct zaclr_loaded_assembly* assembly,
+    const struct zaclr_method_desc* method)
+{
+    return invoke_memorymarshal_span_reference_intrinsic(frame, assembly, method, true);
+}
+
+static struct zaclr_result invoke_memorymarshal_get_reference_intrinsic(
+    struct zaclr_frame* frame,
+    const struct zaclr_loaded_assembly* assembly,
+    const struct zaclr_method_desc* method)
+{
+    return invoke_memorymarshal_span_reference_intrinsic(frame, assembly, method, false);
+}
+
+static struct zaclr_result invoke_bitconverter_bits_intrinsic(struct zaclr_frame* frame,
+                                                              const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value value = {};
+    uint64_t bits;
+    struct zaclr_result result;
+
+    if (frame == NULL || method == NULL || method->name.text == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (text_equals(method->name.text, "Int32BitsToSingle") || text_equals(method->name.text, "UInt32BitsToSingle"))
+    {
+        return push_r4(frame, (uint32_t)numeric_stack_value_bits(&value, 4u));
+    }
+
+    if (text_equals(method->name.text, "Int64BitsToDouble") || text_equals(method->name.text, "UInt64BitsToDouble"))
+    {
+        return push_r8(frame, numeric_stack_value_bits(&value, 8u));
+    }
+
+    if (value.kind == ZACLR_STACK_VALUE_R4)
+    {
+        bits = value.data.r4_bits;
+    }
+    else if (value.kind == ZACLR_STACK_VALUE_R8)
+    {
+        bits = value.data.r8_bits;
+    }
+    else
+    {
+        bits = numeric_stack_value_bits(&value, 8u);
+    }
+
+    if (text_equals(method->name.text, "SingleToInt32Bits") || text_equals(method->name.text, "SingleToUInt32Bits"))
+    {
+        return push_i4(frame, (int32_t)(uint32_t)bits);
+    }
+
+    return push_i8(frame, (int64_t)bits);
+}
+
+static uint64_t reverse_endianness_bits(uint64_t bits, uint32_t width)
+{
+    switch (width)
+    {
+        case 2u:
+            return (uint64_t)((((uint32_t)bits & 0x00FFu) << 8u) | (((uint32_t)bits & 0xFF00u) >> 8u));
+        case 4u:
+            return ((bits & 0x000000FFull) << 24u)
+                 | ((bits & 0x0000FF00ull) << 8u)
+                 | ((bits & 0x00FF0000ull) >> 8u)
+                 | ((bits & 0xFF000000ull) >> 24u);
+        case 8u:
+            return ((bits & 0x00000000000000FFull) << 56u)
+                 | ((bits & 0x000000000000FF00ull) << 40u)
+                 | ((bits & 0x0000000000FF0000ull) << 24u)
+                 | ((bits & 0x00000000FF000000ull) << 8u)
+                 | ((bits & 0x000000FF00000000ull) >> 8u)
+                 | ((bits & 0x0000FF0000000000ull) >> 24u)
+                 | ((bits & 0x00FF000000000000ull) >> 40u)
+                 | ((bits & 0xFF00000000000000ull) >> 56u);
+        default:
+            return bits;
+    }
+}
+
+static struct zaclr_result invoke_binaryprimitives_reverseendianness_intrinsic(struct zaclr_frame* frame,
+                                                                               const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value value = {};
+    uint32_t width;
+    uint64_t bits;
+    struct zaclr_result result;
+
+    if (frame == NULL || method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    width = numeric_width_from_element_type(method->signature.return_type.element_type);
+    if (width == 0u || width == 1u)
+    {
+        width = numeric_width_from_stack_value(&value);
+    }
+
+    if (width == 0u || width > 8u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    bits = reverse_endianness_bits(numeric_stack_value_bits(&value, width), width);
+    return width > 4u ? push_i8(frame, (int64_t)bits) : push_i4(frame, (int32_t)(uint32_t)bits);
+}
+
+static struct zaclr_result invoke_runtimehelpers_isknownconstant_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value ignored = {};
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &ignored);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return push_i4(frame, 0);
+}
+
+static struct zaclr_result invoke_gc_keepalive_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value ignored = {};
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    return zaclr_eval_stack_pop(&frame->eval_stack, &ignored);
 }
 
 static struct zaclr_result invoke_runtimehelpers_isbitwiseequatable_intrinsic(struct zaclr_frame* frame)
@@ -528,6 +2087,83 @@ static struct zaclr_result invoke_runtimehelpers_isbitwiseequatable_intrinsic(st
         }
     }
 
+    return push_i4(frame, result_value != 0u ? 1 : 0);
+}
+
+static uint8_t generic_argument_is_reference_or_contains_references(struct zaclr_runtime* runtime,
+                                                                    const struct zaclr_loaded_assembly* fallback_assembly,
+                                                                    const struct zaclr_generic_argument* argument)
+{
+    const struct zaclr_loaded_assembly* argument_assembly;
+    const struct zaclr_type_desc* type_desc = NULL;
+    const struct zaclr_loaded_assembly* resolved_assembly = NULL;
+    struct zaclr_method_table* method_table = NULL;
+
+    if (argument == NULL)
+    {
+        return 0u;
+    }
+
+    if (argument->kind == ZACLR_GENERIC_ARGUMENT_KIND_PRIMITIVE)
+    {
+        return argument->element_type == ZACLR_ELEMENT_TYPE_STRING
+            || argument->element_type == ZACLR_ELEMENT_TYPE_OBJECT
+            || argument->element_type == ZACLR_ELEMENT_TYPE_CLASS;
+    }
+
+    if (argument->element_type == ZACLR_ELEMENT_TYPE_CLASS)
+    {
+        return 1u;
+    }
+
+    if (argument->element_type != ZACLR_ELEMENT_TYPE_VALUETYPE)
+    {
+        return argument->kind == ZACLR_GENERIC_ARGUMENT_KIND_GENERIC_INST ? 1u : 0u;
+    }
+
+    argument_assembly = argument->assembly != NULL ? argument->assembly : fallback_assembly;
+    if (runtime == NULL || argument_assembly == NULL || zaclr_token_is_nil(&argument->token))
+    {
+        return 0u;
+    }
+
+    if (zaclr_type_system_resolve_type_desc(argument_assembly,
+                                            runtime,
+                                            argument->token,
+                                            &resolved_assembly,
+                                            &type_desc).status != ZACLR_STATUS_OK
+        || resolved_assembly == NULL
+        || type_desc == NULL)
+    {
+        return 0u;
+    }
+
+    if (zaclr_type_prepare(runtime,
+                           (struct zaclr_loaded_assembly*)resolved_assembly,
+                           type_desc,
+                           &method_table).status != ZACLR_STATUS_OK
+        || method_table == NULL)
+    {
+        return 0u;
+    }
+
+    return zaclr_method_table_contains_references(method_table) != 0u ? 1u : 0u;
+}
+
+static struct zaclr_result invoke_runtimehelpers_isreferenceorcontainsreferences_intrinsic(struct zaclr_frame* frame)
+{
+    const struct zaclr_generic_argument* method_argument;
+    uint8_t result_value;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    method_argument = zaclr_generic_context_get_method_argument(&frame->generic_context, 0u);
+    result_value = generic_argument_is_reference_or_contains_references(frame->runtime,
+                                                                        frame->assembly,
+                                                                        method_argument);
     return push_i4(frame, result_value != 0u ? 1 : 0);
 }
 
@@ -711,12 +2347,287 @@ static struct zaclr_result invoke_methodtable_hascomponentsize_intrinsic(struct 
     return push_i4(frame, zaclr_method_table_component_size(method_table) != 0u ? 1 : 0);
 }
 
-static struct zaclr_result invoke_interlocked_exchange_intrinsic(struct zaclr_frame* frame)
+static uint32_t interlocked_width_from_method(const struct zaclr_method_desc* method,
+                                              const struct zaclr_stack_value* address,
+                                              const struct zaclr_stack_value* value)
+{
+    uint32_t width = address != NULL && address->payload_size != 0u && address->payload_size <= 8u
+        ? address->payload_size
+        : 0u;
+
+    if (width == 0u && method != NULL)
+    {
+        switch (method->signature.return_type.element_type)
+        {
+            case ZACLR_ELEMENT_TYPE_I1:
+            case ZACLR_ELEMENT_TYPE_U1:
+            case ZACLR_ELEMENT_TYPE_BOOLEAN:
+                width = 1u;
+                break;
+            case ZACLR_ELEMENT_TYPE_I2:
+            case ZACLR_ELEMENT_TYPE_U2:
+            case ZACLR_ELEMENT_TYPE_CHAR:
+                width = 2u;
+                break;
+            case ZACLR_ELEMENT_TYPE_I8:
+            case ZACLR_ELEMENT_TYPE_U8:
+            case ZACLR_ELEMENT_TYPE_I:
+            case ZACLR_ELEMENT_TYPE_U:
+                width = 8u;
+                break;
+            case ZACLR_ELEMENT_TYPE_CLASS:
+            case ZACLR_ELEMENT_TYPE_OBJECT:
+            case ZACLR_ELEMENT_TYPE_STRING:
+                width = sizeof(void*);
+                break;
+            default:
+                width = 4u;
+                break;
+        }
+    }
+
+    if (width == 0u && value != NULL)
+    {
+        if (value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+        {
+            width = sizeof(void*);
+        }
+        else if (value->kind == ZACLR_STACK_VALUE_I8 || value->kind == ZACLR_STACK_VALUE_R8)
+        {
+            width = 8u;
+        }
+        else if (value->payload_size != 0u && value->payload_size <= 8u)
+        {
+            width = value->payload_size;
+        }
+        else
+        {
+            width = 4u;
+        }
+    }
+
+    return width == 0u ? 4u : width;
+}
+
+static uint64_t interlocked_stack_value_bits(const struct zaclr_stack_value* value,
+                                             uint32_t width)
+{
+    uint64_t bits = 0u;
+    const void* payload;
+
+    if (value == NULL)
+    {
+        return 0u;
+    }
+
+    switch (value->kind)
+    {
+        case ZACLR_STACK_VALUE_OBJECT_REFERENCE:
+            return (uint64_t)(uintptr_t)value->data.object_reference;
+        case ZACLR_STACK_VALUE_I8:
+            return (uint64_t)value->data.i8;
+        case ZACLR_STACK_VALUE_R8:
+            return value->data.r8_bits;
+        case ZACLR_STACK_VALUE_R4:
+            return (uint64_t)value->data.r4_bits;
+        case ZACLR_STACK_VALUE_I4:
+            return (uint64_t)(uint32_t)value->data.i4;
+        case ZACLR_STACK_VALUE_VALUETYPE:
+            payload = zaclr_stack_value_payload_const(value);
+            if (payload != NULL)
+            {
+                kernel_memcpy(&bits, payload, value->payload_size < width ? value->payload_size : width);
+            }
+            return bits;
+        default:
+            return (uint64_t)value->data.raw;
+    }
+}
+
+static struct zaclr_result interlocked_push_bits(struct zaclr_frame* frame,
+                                                 const struct zaclr_method_desc* method,
+                                                 uint32_t width,
+                                                 uint64_t bits)
+{
+    if (method != NULL)
+    {
+        switch (method->signature.return_type.element_type)
+        {
+            case ZACLR_ELEMENT_TYPE_VOID:
+                return zaclr_result_ok();
+            case ZACLR_ELEMENT_TYPE_CLASS:
+            case ZACLR_ELEMENT_TYPE_OBJECT:
+            case ZACLR_ELEMENT_TYPE_STRING:
+                return push_object_reference(frame, (struct zaclr_object_desc*)(uintptr_t)bits);
+            case ZACLR_ELEMENT_TYPE_I8:
+            case ZACLR_ELEMENT_TYPE_U8:
+            case ZACLR_ELEMENT_TYPE_I:
+            case ZACLR_ELEMENT_TYPE_U:
+                return push_i8(frame, (int64_t)bits);
+            default:
+                break;
+        }
+    }
+
+    return width > 4u ? push_i8(frame, (int64_t)bits)
+                      : push_i4(frame, (int32_t)(uint32_t)bits);
+}
+
+static uint64_t interlocked_read_raw_bits(const void* raw_address, uint32_t width)
+{
+    uint64_t bits = 0u;
+    if (raw_address != NULL)
+    {
+        kernel_memcpy(&bits, raw_address, width < sizeof(bits) ? width : sizeof(bits));
+    }
+    return bits;
+}
+
+static void interlocked_write_raw_bits(void* raw_address, uint32_t width, uint64_t bits)
+{
+    if (raw_address != NULL)
+    {
+        kernel_memcpy(raw_address, &bits, width < sizeof(bits) ? width : sizeof(bits));
+    }
+}
+
+static struct zaclr_result interlocked_store_stack_slot(struct zaclr_stack_value* target,
+                                                        const struct zaclr_stack_value* template_value,
+                                                        uint32_t width,
+                                                        uint64_t bits)
+{
+    if (target == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if ((target->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+        || (template_value != NULL && template_value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE))
+    {
+        target->kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
+        target->data.object_reference = (struct zaclr_object_desc*)(uintptr_t)bits;
+        return zaclr_result_ok();
+    }
+
+    if (target->kind == ZACLR_STACK_VALUE_VALUETYPE)
+    {
+        void* payload = zaclr_stack_value_payload(target);
+        if (payload == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        kernel_memcpy(payload, &bits, target->payload_size < width ? target->payload_size : width);
+        return zaclr_result_ok();
+    }
+
+    if (width > 4u || target->kind == ZACLR_STACK_VALUE_I8 || (template_value != NULL && template_value->kind == ZACLR_STACK_VALUE_I8))
+    {
+        target->kind = ZACLR_STACK_VALUE_I8;
+        target->data.i8 = (int64_t)bits;
+        return zaclr_result_ok();
+    }
+
+    target->kind = ZACLR_STACK_VALUE_I4;
+    target->data.i4 = (int32_t)(uint32_t)bits;
+    return zaclr_result_ok();
+}
+
+static bool interlocked_first_parameter_is_pointer(const struct zaclr_method_desc* method)
+{
+    struct zaclr_signature_type parameter = {};
+
+    if (method == NULL || method->signature.parameter_count == 0u)
+    {
+        return false;
+    }
+
+    if (zaclr_signature_read_method_parameter(&method->signature, 0u, &parameter).status != ZACLR_STATUS_OK)
+    {
+        return false;
+    }
+
+    return parameter.element_type == ZACLR_ELEMENT_TYPE_PTR;
+}
+
+static struct zaclr_result interlocked_resolve_target(struct zaclr_frame* frame,
+                                                      const struct zaclr_method_desc* method,
+                                                      struct zaclr_stack_value* address,
+                                                      struct zaclr_stack_value** out_stack_slot,
+                                                      void** out_raw_address)
+{
+    if (address == NULL || out_stack_slot == NULL || out_raw_address == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    *out_stack_slot = NULL;
+    *out_raw_address = NULL;
+
+    if (address->kind == ZACLR_STACK_VALUE_BYREF
+        && (address->flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) == 0u)
+    {
+        *out_raw_address = (void*)(uintptr_t)address->data.raw;
+        return *out_raw_address != NULL
+            ? zaclr_result_ok()
+            : zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (interlocked_first_parameter_is_pointer(method)
+        && address->kind == ZACLR_STACK_VALUE_I8
+        && address->data.i8 != 0)
+    {
+        *out_raw_address = (void*)(uintptr_t)address->data.i8;
+        return zaclr_result_ok();
+    }
+
+    if (interlocked_first_parameter_is_pointer(method)
+        && address->kind == ZACLR_STACK_VALUE_I4
+        && address->data.i4 != 0)
+    {
+        *out_raw_address = (void*)(uintptr_t)(uint32_t)address->data.i4;
+        return zaclr_result_ok();
+    }
+
+    *out_stack_slot = resolve_local_address_target(frame, address);
+    return *out_stack_slot != NULL
+        ? zaclr_result_ok()
+        : zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+}
+
+enum interlocked_binary_operation {
+    INTERLOCKED_BINARY_ADD,
+    INTERLOCKED_BINARY_AND,
+    INTERLOCKED_BINARY_OR
+};
+
+static uint64_t interlocked_apply_binary_operation(enum interlocked_binary_operation operation,
+                                                   uint64_t current,
+                                                   uint64_t value)
+{
+    switch (operation)
+    {
+        case INTERLOCKED_BINARY_ADD:
+            return current + value;
+        case INTERLOCKED_BINARY_AND:
+            return current & value;
+        case INTERLOCKED_BINARY_OR:
+            return current | value;
+        default:
+            return current;
+    }
+}
+
+static struct zaclr_result invoke_interlocked_exchange_intrinsic(struct zaclr_frame* frame,
+                                                                const struct zaclr_method_desc* method)
 {
     struct zaclr_stack_value value = {};
     struct zaclr_stack_value address = {};
     struct zaclr_stack_value* target = NULL;
     void* raw_address = NULL;
+    uint32_t width;
+    uint64_t previous_bits;
+    uint64_t value_bits;
     struct zaclr_result result;
 
     if (frame == NULL)
@@ -733,93 +2644,346 @@ static struct zaclr_result invoke_interlocked_exchange_intrinsic(struct zaclr_fr
     result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
     if (result.status != ZACLR_STATUS_OK)
     {
-        console_write("[ZACLR][intrinsic] exchange pop address failed status=");
-        console_write_dec((uint64_t)result.status);
-        console_write("\n");
         return result;
     }
 
-    console_write("[ZACLR][intrinsic] exchange value_kind=");
-    console_write_dec((uint64_t)value.kind);
-    console_write(" address_kind=");
-    console_write_dec((uint64_t)address.kind);
-    console_write(" address_flags=");
-    console_write_dec((uint64_t)address.flags);
-    console_write(" payload=");
-    console_write_dec((uint64_t)address.payload_size);
-    console_write(" raw=");
-    console_write_hex64((uint64_t)(uintptr_t)address.data.raw);
-    console_write("\n");
-
-    if (address.kind == ZACLR_STACK_VALUE_BYREF
-        && (address.flags & ZACLR_STACK_VALUE_FLAG_BYREF_STACK_SLOT) == 0u)
+    result = interlocked_resolve_target(frame, method, &address, &target, &raw_address);
+    if (result.status != ZACLR_STATUS_OK)
     {
-        raw_address = (void*)(uintptr_t)address.data.raw;
-    }
-    else
-    {
-        target = resolve_local_address_target(frame, &address);
+        return result;
     }
 
-    if (target == NULL && raw_address == NULL)
-    {
-        console_write("[ZACLR][intrinsic] exchange no target resolved\n");
-        return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
-    }
+    width = interlocked_width_from_method(method, &address, &value);
+    value_bits = interlocked_stack_value_bits(&value, width);
 
     if (raw_address != NULL)
     {
-        if (value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
-        {
-            struct zaclr_object_desc** slot = (struct zaclr_object_desc**)raw_address;
-            struct zaclr_object_desc* previous = *slot;
-            *slot = value.data.object_reference;
-            return push_object_reference(frame, previous);
-        }
-
-        if (address.payload_size >= sizeof(int64_t)
-            || value.kind == ZACLR_STACK_VALUE_I8)
-        {
-            int64_t* slot = (int64_t*)raw_address;
-            int64_t previous_value = *slot;
-            int64_t next_value = value.kind == ZACLR_STACK_VALUE_I8 ? value.data.i8 : (int64_t)value.data.i4;
-            *slot = next_value;
-            return push_i8(frame, previous_value);
-        }
-
-        {
-            int32_t* slot = (int32_t*)raw_address;
-            int32_t previous_value = *slot;
-            int32_t next_value = value.kind == ZACLR_STACK_VALUE_I4 ? value.data.i4 : (int32_t)value.data.raw;
-            *slot = next_value;
-            return push_i4(frame, previous_value);
-        }
+        previous_bits = interlocked_read_raw_bits(raw_address, width);
+        interlocked_write_raw_bits(raw_address, width, value_bits);
+        return interlocked_push_bits(frame, method, width, previous_bits);
     }
 
-    if (target->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE || value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+    previous_bits = interlocked_stack_value_bits(target, width);
+    result = interlocked_store_stack_slot(target, &value, width, value_bits);
+    if (result.status != ZACLR_STATUS_OK)
     {
-        struct zaclr_stack_value previous = *target;
-        target->kind = ZACLR_STACK_VALUE_OBJECT_REFERENCE;
-        target->data.object_reference = value.kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE ? value.data.object_reference : NULL;
-        return zaclr_eval_stack_push(&frame->eval_stack, &previous);
+        return result;
     }
 
-    if (target->kind == ZACLR_STACK_VALUE_I8 || value.kind == ZACLR_STACK_VALUE_I8)
+    return interlocked_push_bits(frame, method, width, previous_bits);
+}
+
+static struct zaclr_result invoke_interlocked_compareexchange_intrinsic(struct zaclr_frame* frame,
+                                                                       const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value comparand = {};
+    struct zaclr_stack_value value = {};
+    struct zaclr_stack_value address = {};
+    struct zaclr_stack_value* target = NULL;
+    void* raw_address = NULL;
+    uint32_t width;
+    uint64_t previous_bits;
+    uint64_t value_bits;
+    uint64_t comparand_bits;
+    struct zaclr_result result;
+
+    if (frame == NULL)
     {
-        int64_t previous_value = target->kind == ZACLR_STACK_VALUE_I8 ? target->data.i8 : (int64_t)target->data.i4;
-        int64_t next_value = value.kind == ZACLR_STACK_VALUE_I8 ? value.data.i8 : (int64_t)value.data.i4;
-        target->kind = ZACLR_STACK_VALUE_I8;
-        target->data.i8 = next_value;
-        return push_i8(frame, previous_value);
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &comparand);
+    if (result.status != ZACLR_STATUS_OK)
     {
-        int32_t previous_value = target->kind == ZACLR_STACK_VALUE_I4 ? target->data.i4 : (int32_t)target->data.raw;
-        int32_t next_value = value.kind == ZACLR_STACK_VALUE_I4 ? value.data.i4 : (int32_t)value.data.raw;
-        target->kind = ZACLR_STACK_VALUE_I4;
-        target->data.i4 = next_value;
-        return push_i4(frame, previous_value);
+        return result;
     }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = interlocked_resolve_target(frame, method, &address, &target, &raw_address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    width = interlocked_width_from_method(method, &address, &value);
+    value_bits = interlocked_stack_value_bits(&value, width);
+    comparand_bits = interlocked_stack_value_bits(&comparand, width);
+
+    if (raw_address != NULL)
+    {
+        previous_bits = interlocked_read_raw_bits(raw_address, width);
+        if (previous_bits == comparand_bits)
+        {
+            interlocked_write_raw_bits(raw_address, width, value_bits);
+        }
+        return interlocked_push_bits(frame, method, width, previous_bits);
+    }
+
+    previous_bits = interlocked_stack_value_bits(target, width);
+    if (previous_bits == comparand_bits)
+    {
+        result = interlocked_store_stack_slot(target, &value, width, value_bits);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+    }
+
+    return interlocked_push_bits(frame, method, width, previous_bits);
+}
+
+static struct zaclr_result invoke_interlocked_binary_intrinsic(struct zaclr_frame* frame,
+                                                              const struct zaclr_method_desc* method,
+                                                              enum interlocked_binary_operation operation,
+                                                              bool return_new_value)
+{
+    struct zaclr_stack_value value = {};
+    struct zaclr_stack_value address = {};
+    struct zaclr_stack_value* target = NULL;
+    void* raw_address = NULL;
+    uint32_t width;
+    uint64_t previous_bits;
+    uint64_t value_bits;
+    uint64_t new_bits;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = interlocked_resolve_target(frame, method, &address, &target, &raw_address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    width = interlocked_width_from_method(method, &address, &value);
+    value_bits = interlocked_stack_value_bits(&value, width);
+
+    if (raw_address != NULL)
+    {
+        previous_bits = interlocked_read_raw_bits(raw_address, width);
+        new_bits = interlocked_apply_binary_operation(operation, previous_bits, value_bits);
+        interlocked_write_raw_bits(raw_address, width, new_bits);
+        return interlocked_push_bits(frame, method, width, return_new_value ? new_bits : previous_bits);
+    }
+
+    previous_bits = interlocked_stack_value_bits(target, width);
+    new_bits = interlocked_apply_binary_operation(operation, previous_bits, value_bits);
+    result = interlocked_store_stack_slot(target, &value, width, new_bits);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return interlocked_push_bits(frame, method, width, return_new_value ? new_bits : previous_bits);
+}
+
+static struct zaclr_result invoke_interlocked_increment_or_decrement_intrinsic(struct zaclr_frame* frame,
+                                                                              const struct zaclr_method_desc* method,
+                                                                              int64_t delta)
+{
+    struct zaclr_stack_value address = {};
+    struct zaclr_stack_value* target = NULL;
+    void* raw_address = NULL;
+    uint32_t width;
+    uint64_t previous_bits;
+    uint64_t new_bits;
+    struct zaclr_stack_value template_value = {};
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = interlocked_resolve_target(frame, method, &address, &target, &raw_address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    width = interlocked_width_from_method(method, &address, target);
+    if (raw_address != NULL)
+    {
+        previous_bits = interlocked_read_raw_bits(raw_address, width);
+        new_bits = (uint64_t)((int64_t)previous_bits + delta);
+        interlocked_write_raw_bits(raw_address, width, new_bits);
+        return interlocked_push_bits(frame, method, width, new_bits);
+    }
+
+    previous_bits = interlocked_stack_value_bits(target, width);
+    new_bits = (uint64_t)((int64_t)previous_bits + delta);
+    template_value.kind = width > 4u ? ZACLR_STACK_VALUE_I8 : ZACLR_STACK_VALUE_I4;
+    result = interlocked_store_stack_slot(target, &template_value, width, new_bits);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return interlocked_push_bits(frame, method, width, new_bits);
+}
+
+static struct zaclr_result invoke_interlocked_read_intrinsic(struct zaclr_frame* frame,
+                                                             const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value address = {};
+    struct zaclr_stack_value* target = NULL;
+    void* raw_address = NULL;
+    uint32_t width;
+    uint64_t bits;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = interlocked_resolve_target(frame, method, &address, &target, &raw_address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    width = interlocked_width_from_method(method, &address, target);
+    bits = raw_address != NULL
+        ? interlocked_read_raw_bits(raw_address, width)
+        : interlocked_stack_value_bits(target, width);
+    return interlocked_push_bits(frame, method, width, bits);
+}
+
+static uint32_t volatile_width_from_values(const struct zaclr_method_desc* method,
+                                           const struct zaclr_stack_value* address,
+                                           const struct zaclr_stack_value* target_or_value)
+{
+    if (method != NULL
+        && (method->signature.return_type.element_type == ZACLR_ELEMENT_TYPE_VAR
+            || method->signature.return_type.element_type == ZACLR_ELEMENT_TYPE_MVAR)
+        && target_or_value != NULL)
+    {
+        uint32_t width = stack_value_scalar_width(target_or_value);
+        if (width != 0u && width <= 8u)
+        {
+            return width;
+        }
+    }
+
+    return interlocked_width_from_method(method, address, target_or_value);
+}
+
+static struct zaclr_result invoke_volatile_read_intrinsic(struct zaclr_frame* frame,
+                                                          const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value address = {};
+    struct zaclr_stack_value* target = NULL;
+    void* raw_address = NULL;
+    uint32_t width;
+    uint64_t bits;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = interlocked_resolve_target(frame, method, &address, &target, &raw_address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    width = volatile_width_from_values(method, &address, target);
+    bits = raw_address != NULL
+        ? interlocked_read_raw_bits(raw_address, width)
+        : interlocked_stack_value_bits(target, width);
+    return interlocked_push_bits(frame, method, width, bits);
+}
+
+static struct zaclr_result invoke_volatile_write_intrinsic(struct zaclr_frame* frame,
+                                                           const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value value = {};
+    struct zaclr_stack_value address = {};
+    struct zaclr_stack_value* target = NULL;
+    void* raw_address = NULL;
+    uint32_t width;
+    uint64_t bits;
+    struct zaclr_result result;
+
+    if (frame == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = interlocked_resolve_target(frame, method, &address, &target, &raw_address);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    width = volatile_width_from_values(method, &address, &value);
+    bits = interlocked_stack_value_bits(&value, width);
+    if (raw_address != NULL)
+    {
+        interlocked_write_raw_bits(raw_address, width, bits);
+        return zaclr_result_ok();
+    }
+
+    return interlocked_store_stack_slot(target, &value, width, bits);
 }
 
 static struct zaclr_result invoke_gchandle_gethandlevalue_intrinsic(struct zaclr_frame* frame)
@@ -1006,9 +3170,80 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
         return invoke_unsafe_add_intrinsic(frame);
     }
 
-    if (is_vector_ishardwareaccelerated_intrinsic(effective_type, method))
+    if (is_unsafe_named_intrinsic(effective_type, method, "AddByteOffset"))
+    {
+        return invoke_unsafe_byte_offset_intrinsic(frame, 1);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "SubtractByteOffset"))
+    {
+        return invoke_unsafe_byte_offset_intrinsic(frame, -1);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "AreSame"))
+    {
+        return invoke_unsafe_are_same_or_offset_intrinsic(frame, false);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "ByteOffset"))
+    {
+        return invoke_unsafe_are_same_or_offset_intrinsic(frame, true);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "NullRef"))
+    {
+        return invoke_unsafe_nullref_intrinsic(frame);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "IsNullRef"))
+    {
+        return invoke_unsafe_isnullref_intrinsic(frame);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "AsRef"))
+    {
+        return invoke_unsafe_asref_intrinsic(frame);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "SkipInit"))
+    {
+        return invoke_unsafe_skipinit_intrinsic(frame);
+    }
+
+    if (is_vector_ishardwareaccelerated_intrinsic(effective_type, method)
+        || is_hardwareintrinsic_issupported_intrinsic(effective_type, method))
     {
         return invoke_vector_ishardwareaccelerated_intrinsic(frame);
+    }
+
+    if (is_inumberbase_isnegative_intrinsic(effective_type, method))
+    {
+        return invoke_inumberbase_isnegative_intrinsic(frame);
+    }
+
+    if (is_span_get_length_intrinsic(effective_type, method))
+    {
+        return invoke_span_get_length_intrinsic(frame, assembly, effective_type);
+    }
+
+    if (is_memorymarshal_get_non_null_pinnable_reference_intrinsic(effective_type, method))
+    {
+        return invoke_memorymarshal_get_non_null_pinnable_reference_intrinsic(frame, assembly, method);
+    }
+
+    if (is_memorymarshal_get_reference_intrinsic(effective_type, method))
+    {
+        return invoke_memorymarshal_get_reference_intrinsic(frame, assembly, method);
+    }
+
+    if (is_bitconverter_bits_intrinsic(effective_type, method))
+    {
+        return invoke_bitconverter_bits_intrinsic(frame, method);
+    }
+
+    if (is_binaryprimitives_reverseendianness_intrinsic(effective_type, method))
+    {
+        return invoke_binaryprimitives_reverseendianness_intrinsic(frame, method);
     }
 
     if (is_runtimehelpers_getmethodtable_intrinsic(effective_type, method))
@@ -1024,6 +3259,21 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
     if (is_runtimehelpers_isbitwiseequatable_intrinsic(effective_type, method))
     {
         return invoke_runtimehelpers_isbitwiseequatable_intrinsic(frame);
+    }
+
+    if (is_runtimehelpers_isreferenceorcontainsreferences_intrinsic(effective_type, method))
+    {
+        return invoke_runtimehelpers_isreferenceorcontainsreferences_intrinsic(frame);
+    }
+
+    if (is_runtimehelpers_isknownconstant_intrinsic(effective_type, method))
+    {
+        return invoke_runtimehelpers_isknownconstant_intrinsic(frame);
+    }
+
+    if (is_gc_keepalive_intrinsic(effective_type, method))
+    {
+        return invoke_gc_keepalive_intrinsic(frame);
     }
 
     if (is_methodtable_hasfinalizer_intrinsic(effective_type, method))
@@ -1049,7 +3299,67 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
         console_write(" depth=");
         console_write_dec((uint64_t)(frame != NULL ? frame->eval_stack.depth : 0u));
         console_write("\n");
-        return invoke_interlocked_exchange_intrinsic(frame);
+        return invoke_interlocked_exchange_intrinsic(frame, method);
+    }
+
+    if (is_interlocked_compareexchange_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_compareexchange_intrinsic(frame, method);
+    }
+
+    if (is_interlocked_exchangeadd_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_binary_intrinsic(frame, method, INTERLOCKED_BINARY_ADD, false);
+    }
+
+    if (is_interlocked_add_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_binary_intrinsic(frame, method, INTERLOCKED_BINARY_ADD, true);
+    }
+
+    if (is_interlocked_and_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_binary_intrinsic(frame, method, INTERLOCKED_BINARY_AND, false);
+    }
+
+    if (is_interlocked_or_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_binary_intrinsic(frame, method, INTERLOCKED_BINARY_OR, false);
+    }
+
+    if (is_interlocked_increment_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_increment_or_decrement_intrinsic(frame, method, 1);
+    }
+
+    if (is_interlocked_decrement_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_increment_or_decrement_intrinsic(frame, method, -1);
+    }
+
+    if (is_interlocked_read_intrinsic(effective_type, method))
+    {
+        return invoke_interlocked_read_intrinsic(frame, method);
+    }
+
+    if (is_interlocked_memorybarrier_intrinsic(effective_type, method))
+    {
+        return zaclr_result_ok();
+    }
+
+    if (is_volatile_read_intrinsic(effective_type, method))
+    {
+        return invoke_volatile_read_intrinsic(frame, method);
+    }
+
+    if (is_volatile_write_intrinsic(effective_type, method))
+    {
+        return invoke_volatile_write_intrinsic(frame, method);
+    }
+
+    if (is_volatile_barrier_intrinsic(effective_type, method))
+    {
+        return zaclr_result_ok();
     }
 
     if (is_gchandle_gethandlevalue_intrinsic(effective_type, method))

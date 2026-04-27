@@ -191,6 +191,52 @@ namespace
     }
 }
 
+struct zaclr_result zaclr_native_System_String::FastAllocateString___STATIC__STRING__PTR_VALUETYPE_System_Runtime_CompilerServices_MethodTable__I(struct zaclr_native_call_frame& frame)
+{
+    struct zaclr_result status;
+    int64_t length = 0;
+    uint16_t* chars = NULL;
+    zaclr_object_handle handle = 0u;
+
+    if (frame.runtime == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
+    }
+
+    status = zaclr_native_call_frame_arg_i8(&frame, 1u, &length);
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        return status;
+    }
+
+    if (length < 0 || length > 0x7FFFFFFFll)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_INTEROP);
+    }
+
+    if (length != 0)
+    {
+        chars = (uint16_t*)kernel_alloc(sizeof(uint16_t) * (size_t)length);
+        if (chars == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_OUT_OF_MEMORY, ZACLR_STATUS_CATEGORY_INTEROP);
+        }
+
+        kernel_memset(chars, 0, sizeof(uint16_t) * (size_t)length);
+    }
+
+    status = zaclr_string_allocate_utf16_handle(&frame.runtime->heap,
+                                                chars,
+                                                (uint32_t)length,
+                                                &handle);
+    if (chars != NULL)
+    {
+        kernel_free(chars);
+    }
+
+    return status.status == ZACLR_STATUS_OK ? zaclr_native_call_frame_set_string(&frame, handle) : status;
+}
+
 struct zaclr_result zaclr_native_System_String::Concat___STATIC__STRING__STRING__STRING(struct zaclr_native_call_frame& frame)
 {
     const struct zaclr_string_desc* left;

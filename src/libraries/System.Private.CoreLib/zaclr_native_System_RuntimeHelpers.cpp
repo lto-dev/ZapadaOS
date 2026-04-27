@@ -83,42 +83,40 @@ struct zaclr_result zaclr_native_System_RuntimeHelpers::ReflectionInvocation_Run
             const void* payload = zaclr_stack_value_payload_const(arg0);
             if (payload != NULL)
             {
-                /* Observed ZACLR QCallTypeHandle flow for RunClassConstructor:
-                   - the managed ctor receives RuntimeType.GetUnderlyingNativeHandle()
-                   - the resulting 16-byte valuetype reaches this QCall with the
-                     first pointer-sized slot populated and the second slot zeroed
+                /* CoreLib QCallTypeHandle layout is:
+                   slot 0: _ptr    - address of the managed RuntimeType reference
+                   slot 1: _handle - RuntimeType native handle
 
-                   Accept both layouts defensively:
-                   1) first slot contains the RuntimeType native/object handle
-                   2) second slot contains the handle (older assumption) */
-                uintptr_t native_type_handle_slot0 = 0u;
-                uintptr_t native_type_handle_slot1 = 0u;
+                   RunClassConstructor must use _handle.  The _ptr slot is only a
+                   fallback for older incomplete wrapper materialization paths. */
+                uintptr_t runtime_type_reference_slot = 0u;
+                uintptr_t native_type_handle_slot = 0u;
 
                 if (arg0->payload_size >= sizeof(uintptr_t))
                 {
-                    kernel_memcpy(&native_type_handle_slot0,
+                    kernel_memcpy(&runtime_type_reference_slot,
                                   payload,
-                                  sizeof(native_type_handle_slot0));
+                                  sizeof(runtime_type_reference_slot));
                 }
 
                 if (arg0->payload_size >= sizeof(void*) + sizeof(uintptr_t))
                 {
-                    kernel_memcpy(&native_type_handle_slot1,
+                    kernel_memcpy(&native_type_handle_slot,
                                   (const uint8_t*)payload + sizeof(void*),
-                                  sizeof(native_type_handle_slot1));
+                                  sizeof(native_type_handle_slot));
                 }
 
-                console_write("[ZACLR][runtimehelpers] valuetype payload slot0=");
-                console_write_hex64((uint64_t)native_type_handle_slot0);
-                console_write(" slot1=");
-                console_write_hex64((uint64_t)native_type_handle_slot1);
+                console_write("[ZACLR][runtimehelpers] valuetype payload ptr=");
+                console_write_hex64((uint64_t)runtime_type_reference_slot);
+                console_write(" handle=");
+                console_write_hex64((uint64_t)native_type_handle_slot);
                 console_write(" current_cached_handle=");
                 console_write_hex64((uint64_t)runtime_type_handle);
                 console_write("\n");
 
-                runtime_type_handle = (zaclr_object_handle)(native_type_handle_slot0 != 0u
-                    ? native_type_handle_slot0
-                    : native_type_handle_slot1);
+                runtime_type_handle = (zaclr_object_handle)(native_type_handle_slot != 0u
+                    ? native_type_handle_slot
+                    : runtime_type_reference_slot);
 
                 if (runtime_type_handle != 0u && frame.runtime != NULL)
                 {

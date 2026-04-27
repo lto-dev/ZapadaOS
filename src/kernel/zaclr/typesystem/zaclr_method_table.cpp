@@ -14,6 +14,23 @@ namespace
         }
         return *a == *b;
     }
+
+    static bool virtual_slot_matches_declared_method(const struct zaclr_method_desc* slot,
+                                                     const struct zaclr_method_desc* declared_method)
+    {
+        if (slot == NULL
+            || declared_method == NULL
+            || slot->name.text == NULL
+            || declared_method->name.text == NULL
+            || !text_equals(slot->name.text, declared_method->name.text))
+        {
+            return false;
+        }
+
+        return slot->signature.parameter_count == declared_method->signature.parameter_count
+            && slot->signature.generic_parameter_count == declared_method->signature.generic_parameter_count
+            && ((slot->signature.calling_convention & 0x20u) == (declared_method->signature.calling_convention & 0x20u));
+    }
 }
 
 extern "C" uint8_t zaclr_method_table_has_finalizer(const struct zaclr_method_table* mt)
@@ -183,17 +200,11 @@ extern "C" const struct zaclr_method_desc* zaclr_method_table_resolve_virtual(
         return declared_method;
     }
 
-    /* Search the runtime type's vtable for the override by name.
-       The vtable was built by build_vtable() which uses name-matching for
-       overrides, so the slot at runtime_mt contains the most-derived
-       implementation for each virtual method name. */
+    /* Search the runtime type's vtable for the override by name and signature shape. */
     for (slot_index = 0u; slot_index < runtime_mt->vtable_slot_count; ++slot_index)
     {
         const struct zaclr_method_desc* slot = runtime_mt->vtable[slot_index];
-        if (slot != NULL
-            && slot->name.text != NULL
-            && declared_method->name.text != NULL
-            && text_equals(slot->name.text, declared_method->name.text))
+        if (virtual_slot_matches_declared_method(slot, declared_method))
         {
             return slot;
         }

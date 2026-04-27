@@ -22,6 +22,10 @@ enum zaclr_gc_handle_kind {
     ZACLR_GC_HANDLE_KIND_PINNED = 3
 };
 
+enum zaclr_gc_handle_entry_flags {
+    ZACLR_GC_HANDLE_ENTRY_FLAG_ALLOCATED = 0x01u
+};
+
 struct zaclr_gc_handle_entry {
     zaclr_object_handle handle;
     uint8_t kind;

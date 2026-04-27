@@ -31,6 +31,7 @@ struct zaclr_frame {
     uint16_t exception_clause_count;
     struct zaclr_eval_stack eval_stack;
     struct zaclr_generic_context generic_context;
+    uint32_t pending_constrained_token_raw;
     uint32_t flags;
 };
 
