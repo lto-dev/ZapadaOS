@@ -213,12 +213,6 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
     {
         const struct zaclr_native_bind_method* candidate = &assembly->method_lookup[method_index];
         bool matches = false;
-        log_method_search_line("MethodSearch.Check",
-                               assembly->assembly_name,
-                               candidate != NULL ? candidate->type_namespace : NULL,
-                               candidate != NULL ? candidate->type_name : NULL,
-                               candidate != NULL ? candidate->method_name : "<null>",
-                               method_index + 1u);
         if (candidate == NULL)
         {
             continue;

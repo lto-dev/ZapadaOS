@@ -8,6 +8,7 @@
 #include <kernel/zaclr/heap/zaclr_gc_roots.h>
 #include <kernel/zaclr/heap/zaclr_heap.h>
 #include <kernel/zaclr/heap/zaclr_object.h>
+#include <kernel/zaclr/heap/zaclr_string.h>
 #include <kernel/zaclr/metadata/zaclr_metadata_reader.h>
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
 #include <kernel/zaclr/typesystem/zaclr_field_layout.h>
@@ -83,6 +84,20 @@ namespace
     {
         return zaclr_text_equals(left, right);
     }
+
+    enum class zaclr_string_intrinsic_kind : uint8_t
+    {
+        none = 0,
+        starts_with,
+        ends_with,
+        contains,
+        compare,
+        to_upper,
+        to_lower,
+        trim,
+        replace,
+        index_of_char
+    };
 
     static struct zaclr_stack_value* resolve_local_address_target(struct zaclr_frame* frame,
                                                                   struct zaclr_stack_value* value)
@@ -607,6 +622,86 @@ namespace
             && method->signature.parameter_count == 1u;
     }
 
+    static bool try_get_string_runtime_intrinsic_kind(const struct zaclr_type_desc* type,
+                                                      const struct zaclr_method_desc* method,
+                                                      zaclr_string_intrinsic_kind* out_kind)
+    {
+        const bool has_this = method != NULL && ((method->signature.calling_convention & 0x20u) != 0u);
+
+        if (out_kind != NULL)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::none;
+        }
+
+        if (type == NULL
+            || method == NULL
+            || out_kind == NULL
+            || type->type_namespace.text == NULL
+            || type->type_name.text == NULL
+            || method->name.text == NULL
+            || !text_equals(type->type_namespace.text, "System")
+            || !text_equals(type->type_name.text, "String"))
+        {
+            return false;
+        }
+
+        if (has_this && text_equals(method->name.text, "StartsWith") && method->signature.parameter_count >= 1u && method->signature.parameter_count <= 2u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::starts_with;
+            return true;
+        }
+
+        if (has_this && text_equals(method->name.text, "EndsWith") && method->signature.parameter_count >= 1u && method->signature.parameter_count <= 2u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::ends_with;
+            return true;
+        }
+
+        if (has_this && text_equals(method->name.text, "Contains") && method->signature.parameter_count >= 1u && method->signature.parameter_count <= 2u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::contains;
+            return true;
+        }
+
+        if (!has_this && text_equals(method->name.text, "Compare") && method->signature.parameter_count >= 2u && method->signature.parameter_count <= 3u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::compare;
+            return true;
+        }
+
+        if (has_this && text_equals(method->name.text, "ToUpper") && method->signature.parameter_count == 0u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::to_upper;
+            return true;
+        }
+
+        if (has_this && text_equals(method->name.text, "ToLower") && method->signature.parameter_count == 0u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::to_lower;
+            return true;
+        }
+
+        if (has_this && text_equals(method->name.text, "Trim") && method->signature.parameter_count == 0u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::trim;
+            return true;
+        }
+
+        if (has_this && text_equals(method->name.text, "Replace") && method->signature.parameter_count == 2u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::replace;
+            return true;
+        }
+
+        if (has_this && text_equals(method->name.text, "IndexOf") && method->signature.parameter_count == 1u)
+        {
+            *out_kind = zaclr_string_intrinsic_kind::index_of_char;
+            return true;
+        }
+
+        return false;
+    }
+
     static bool is_span_get_length_intrinsic(const struct zaclr_type_desc* type,
                                              const struct zaclr_method_desc* method)
     {
@@ -992,9 +1087,30 @@ namespace
     }
 }
 
-static struct zaclr_result invoke_unsafe_as_intrinsic(struct zaclr_frame* frame)
+static uint32_t unsafe_generic_argument_width(const struct zaclr_generic_argument* argument)
+{
+    uint32_t width;
+
+    if (argument == NULL)
+    {
+        return 0u;
+    }
+
+    width = numeric_width_from_element_type(argument->element_type);
+    if (width != 0u)
+    {
+        return width;
+    }
+
+    return zaclr_field_layout_size_from_element_type(argument->element_type);
+}
+
+static struct zaclr_result invoke_unsafe_as_intrinsic(struct zaclr_frame* frame,
+                                                      const struct zaclr_method_desc* method)
 {
     struct zaclr_stack_value value = {};
+    const struct zaclr_generic_argument* destination_argument;
+    uint32_t destination_width = 0u;
     struct zaclr_result result;
 
     ZACLR_TRACE_VALUE(frame != NULL ? frame->runtime : NULL,
@@ -1015,6 +1131,19 @@ static struct zaclr_result invoke_unsafe_as_intrinsic(struct zaclr_frame* frame)
         console_write_dec((uint64_t)result.status);
         console_write("\n");
         return result;
+    }
+
+    (void)method;
+
+    if (frame->generic_context.method_arg_count >= 2u
+        && (value.kind == ZACLR_STACK_VALUE_BYREF || value.kind == ZACLR_STACK_VALUE_LOCAL_ADDRESS))
+    {
+        destination_argument = zaclr_generic_context_get_method_argument(&frame->generic_context, 1u);
+        destination_width = unsafe_generic_argument_width(destination_argument);
+        if (destination_width != 0u)
+        {
+            value.payload_size = destination_width;
+        }
     }
 
     return zaclr_eval_stack_push(&frame->eval_stack, &value);
@@ -1082,7 +1211,9 @@ static struct zaclr_result invoke_unsafe_add_intrinsic(struct zaclr_frame* frame
 {
     struct zaclr_stack_value index_value = {};
     struct zaclr_stack_value byref_value = {};
+    const struct zaclr_generic_argument* element_argument;
     struct zaclr_result result;
+    uint32_t element_width = 0u;
     int64_t index = 0;
 
     if (frame == NULL)
@@ -1118,6 +1249,13 @@ static struct zaclr_result invoke_unsafe_add_intrinsic(struct zaclr_frame* frame
     else
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    element_argument = zaclr_generic_context_get_method_argument(&frame->generic_context, 0u);
+    element_width = unsafe_generic_argument_width(element_argument);
+    if (element_width != 0u)
+    {
+        byref_value.payload_size = element_width;
     }
 
     if (byref_value.payload_size == 0u)
@@ -1328,6 +1466,277 @@ static struct zaclr_result invoke_unsafe_skipinit_intrinsic(struct zaclr_frame* 
     return zaclr_eval_stack_pop(&frame->eval_stack, &ignored);
 }
 
+static struct zaclr_result push_unaligned_read_value(struct zaclr_frame* frame,
+                                                     uint8_t element_type,
+                                                     uint32_t type_token_raw,
+                                                     const void* source,
+                                                     uint32_t width)
+{
+    uint64_t bits = 0u;
+    struct zaclr_stack_value value = {};
+    struct zaclr_result result;
+
+    if (frame == NULL || source == NULL || width == 0u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (width > sizeof(bits))
+    {
+        result = zaclr_stack_value_set_valuetype(&value, type_token_raw, source, width);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        return zaclr_eval_stack_push(&frame->eval_stack, &value);
+    }
+
+    kernel_memcpy(&bits, source, width);
+    switch (element_type)
+    {
+        case ZACLR_ELEMENT_TYPE_BOOLEAN:
+        case ZACLR_ELEMENT_TYPE_U1:
+            return push_i4(frame, (int32_t)(uint8_t)bits);
+
+        case ZACLR_ELEMENT_TYPE_I1:
+            return push_i4(frame, (int32_t)(int8_t)(uint8_t)bits);
+
+        case ZACLR_ELEMENT_TYPE_CHAR:
+        case ZACLR_ELEMENT_TYPE_U2:
+            return push_i4(frame, (int32_t)(uint16_t)bits);
+
+        case ZACLR_ELEMENT_TYPE_I2:
+            return push_i4(frame, (int32_t)(int16_t)(uint16_t)bits);
+
+        case ZACLR_ELEMENT_TYPE_I4:
+        case ZACLR_ELEMENT_TYPE_U4:
+            return push_i4(frame, (int32_t)(uint32_t)bits);
+
+        case ZACLR_ELEMENT_TYPE_R4:
+            return push_r4(frame, (uint32_t)bits);
+
+        case ZACLR_ELEMENT_TYPE_I:
+        case ZACLR_ELEMENT_TYPE_U:
+        case ZACLR_ELEMENT_TYPE_I8:
+        case ZACLR_ELEMENT_TYPE_U8:
+            return push_i8(frame, (int64_t)bits);
+
+        case ZACLR_ELEMENT_TYPE_R8:
+            return push_r8(frame, bits);
+
+        case ZACLR_ELEMENT_TYPE_CLASS:
+        case ZACLR_ELEMENT_TYPE_OBJECT:
+        case ZACLR_ELEMENT_TYPE_STRING:
+        case ZACLR_ELEMENT_TYPE_SZARRAY:
+            return push_object_reference(frame, (struct zaclr_object_desc*)(uintptr_t)bits);
+
+        default:
+            result = zaclr_stack_value_set_valuetype(&value, type_token_raw, &bits, width);
+            if (result.status != ZACLR_STATUS_OK)
+            {
+                return result;
+            }
+
+            return zaclr_eval_stack_push(&frame->eval_stack, &value);
+    }
+}
+
+static struct zaclr_result invoke_unsafe_read_unaligned_intrinsic(struct zaclr_frame* frame,
+                                                                 const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value source_value = {};
+    const struct zaclr_generic_argument* generic_argument;
+    uintptr_t address = 0u;
+    uint32_t payload_size = 0u;
+    uint32_t source_type_token_raw = 0u;
+    uint8_t element_type = 0u;
+    uint32_t type_token_raw = 0u;
+    uint32_t width = 0u;
+    struct zaclr_result result;
+
+    if (frame == NULL || method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &source_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    generic_argument = zaclr_generic_context_get_method_argument(&frame->generic_context, 0u);
+    if (generic_argument != NULL)
+    {
+        element_type = generic_argument->element_type;
+        type_token_raw = generic_argument->token.raw;
+    }
+
+    if (element_type == 0u)
+    {
+        element_type = method->signature.return_type.element_type;
+        type_token_raw = method->signature.return_type.type_token.raw;
+    }
+
+    width = numeric_width_from_element_type(element_type);
+    if (width == 0u)
+    {
+        width = zaclr_field_layout_size_from_element_type(element_type);
+    }
+
+    result = raw_address_from_stack_value(frame, &source_value, &address, &payload_size, &source_type_token_raw);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (address == 0u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (width == 0u)
+    {
+        width = payload_size;
+    }
+
+    if (type_token_raw == 0u)
+    {
+        type_token_raw = source_type_token_raw;
+    }
+
+    if (width == 0u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    return push_unaligned_read_value(frame,
+                                     element_type,
+                                     type_token_raw,
+                                     (const void*)(uintptr_t)address,
+                                     width);
+}
+
+static struct zaclr_result write_unaligned_stack_value(void* destination,
+                                                       uint32_t width,
+                                                       const struct zaclr_stack_value* value)
+{
+    const void* payload;
+    uint64_t bits;
+    struct zaclr_object_desc* object_reference;
+
+    if (destination == NULL || width == 0u || value == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_VALUETYPE)
+    {
+        payload = zaclr_stack_value_payload_const(value);
+        if (payload == NULL)
+        {
+            return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        kernel_memcpy(destination, payload, value->payload_size < width ? value->payload_size : width);
+        return zaclr_result_ok();
+    }
+
+    if (value->kind == ZACLR_STACK_VALUE_OBJECT_REFERENCE)
+    {
+        object_reference = value->data.object_reference;
+        kernel_memcpy(destination, &object_reference, width < sizeof(object_reference) ? width : sizeof(object_reference));
+        return zaclr_result_ok();
+    }
+
+    bits = numeric_stack_value_bits(value, width);
+    kernel_memcpy(destination, &bits, width < sizeof(bits) ? width : sizeof(bits));
+    return zaclr_result_ok();
+}
+
+static struct zaclr_result invoke_unsafe_write_unaligned_intrinsic(struct zaclr_frame* frame,
+                                                                  const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value value = {};
+    struct zaclr_stack_value destination_value = {};
+    const struct zaclr_generic_argument* generic_argument;
+    uintptr_t address = 0u;
+    uint32_t payload_size = 0u;
+    uint32_t destination_type_token_raw = 0u;
+    uint8_t element_type = 0u;
+    uint32_t width = 0u;
+    struct zaclr_result result;
+
+    if (frame == NULL || method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &destination_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    generic_argument = zaclr_generic_context_get_method_argument(&frame->generic_context, 0u);
+    if (generic_argument != NULL)
+    {
+        element_type = generic_argument->element_type;
+    }
+
+    if (element_type == 0u && method->signature.parameter_count >= 2u)
+    {
+        struct zaclr_signature_type parameter_type = {};
+        result = zaclr_signature_read_method_parameter(&method->signature, 1u, &parameter_type);
+        if (result.status == ZACLR_STATUS_OK)
+        {
+            element_type = parameter_type.element_type;
+        }
+    }
+
+    width = numeric_width_from_element_type(element_type);
+    if (width == 0u)
+    {
+        width = zaclr_field_layout_size_from_element_type(element_type);
+    }
+
+    result = raw_address_from_stack_value(frame, &destination_value, &address, &payload_size, &destination_type_token_raw);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (address == 0u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (width == 0u)
+    {
+        width = numeric_width_from_stack_value(&value);
+    }
+
+    if (width == 0u)
+    {
+        width = payload_size;
+    }
+
+    if (width == 0u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    (void)destination_type_token_raw;
+    return write_unaligned_stack_value((void*)(uintptr_t)address, width, &value);
+}
+
 static struct zaclr_result invoke_vector_ishardwareaccelerated_intrinsic(struct zaclr_frame* frame)
 {
     if (frame == NULL)
@@ -1394,6 +1803,471 @@ static struct zaclr_result invoke_inumberbase_isnegative_intrinsic(struct zaclr_
     }
 
     return push_i4(frame, is_negative ? 1 : 0);
+}
+
+static const struct zaclr_string_desc* string_from_stack_value(struct zaclr_frame* frame,
+                                                               const struct zaclr_stack_value* value)
+{
+    zaclr_object_handle handle;
+
+    if (frame == NULL
+        || frame->runtime == NULL
+        || value == NULL
+        || value->kind != ZACLR_STACK_VALUE_OBJECT_REFERENCE
+        || value->data.object_reference == NULL)
+    {
+        return NULL;
+    }
+
+    handle = zaclr_heap_get_object_handle(&frame->runtime->heap, value->data.object_reference);
+    return handle == 0u ? NULL : zaclr_string_from_handle_const(&frame->runtime->heap, handle);
+}
+
+static bool string_region_equals(const struct zaclr_string_desc* text,
+                                 uint32_t text_offset,
+                                 const struct zaclr_string_desc* value)
+{
+    uint32_t index;
+
+    if (text == NULL || value == NULL || text_offset + zaclr_string_length(value) > zaclr_string_length(text))
+    {
+        return false;
+    }
+
+    for (index = 0u; index < zaclr_string_length(value); ++index)
+    {
+        if (zaclr_string_char_at(text, text_offset + index) != zaclr_string_char_at(value, index))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static int32_t string_compare_ordinal(const struct zaclr_string_desc* left,
+                                      const struct zaclr_string_desc* right)
+{
+    uint32_t index;
+    uint32_t left_length;
+    uint32_t right_length;
+    uint32_t min_length;
+
+    if (left == right)
+    {
+        return 0;
+    }
+
+    if (left == NULL)
+    {
+        return -1;
+    }
+
+    if (right == NULL)
+    {
+        return 1;
+    }
+
+    left_length = zaclr_string_length(left);
+    right_length = zaclr_string_length(right);
+    min_length = left_length < right_length ? left_length : right_length;
+
+    for (index = 0u; index < min_length; ++index)
+    {
+        const uint16_t left_char = zaclr_string_char_at(left, index);
+        const uint16_t right_char = zaclr_string_char_at(right, index);
+        if (left_char != right_char)
+        {
+            return left_char < right_char ? -1 : 1;
+        }
+    }
+
+    if (left_length == right_length)
+    {
+        return 0;
+    }
+
+    return left_length < right_length ? -1 : 1;
+}
+
+static uint16_t string_uppercase_ascii(uint16_t value)
+{
+    return value >= (uint16_t)'a' && value <= (uint16_t)'z' ? (uint16_t)(value - 32u) : value;
+}
+
+static uint16_t string_lowercase_ascii(uint16_t value)
+{
+    return value >= (uint16_t)'A' && value <= (uint16_t)'Z' ? (uint16_t)(value + 32u) : value;
+}
+
+static struct zaclr_result push_string_copy(struct zaclr_frame* frame,
+                                            const uint16_t* text,
+                                            uint32_t length)
+{
+    struct zaclr_string_desc* string_object = NULL;
+    struct zaclr_result result;
+
+    if (frame == NULL || frame->runtime == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_string_allocate_utf16(&frame->runtime->heap, text, length, &string_object);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return push_object_reference(frame, &string_object->object);
+}
+
+static struct zaclr_result invoke_string_search_intrinsic(struct zaclr_frame* frame,
+                                                          zaclr_string_intrinsic_kind kind)
+{
+    struct zaclr_stack_value value_arg = {};
+    struct zaclr_stack_value ignored_comparison = {};
+    struct zaclr_stack_value this_value = {};
+    const struct zaclr_string_desc* text;
+    const struct zaclr_string_desc* value;
+    bool matches = false;
+    struct zaclr_result result;
+
+    if (frame == NULL || frame->method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (frame->method->signature.parameter_count == 2u)
+    {
+        result = zaclr_eval_stack_pop(&frame->eval_stack, &ignored_comparison);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value_arg);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &this_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    text = string_from_stack_value(frame, &this_value);
+    value = string_from_stack_value(frame, &value_arg);
+    if (text == NULL || value == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (kind == zaclr_string_intrinsic_kind::starts_with)
+    {
+        matches = string_region_equals(text, 0u, value);
+    }
+    else if (kind == zaclr_string_intrinsic_kind::ends_with)
+    {
+        const uint32_t text_length = zaclr_string_length(text);
+        const uint32_t value_length = zaclr_string_length(value);
+        matches = value_length <= text_length && string_region_equals(text, text_length - value_length, value);
+    }
+    else if (kind == zaclr_string_intrinsic_kind::contains)
+    {
+        uint32_t offset;
+        matches = zaclr_string_length(value) == 0u;
+        for (offset = 0u; !matches && offset + zaclr_string_length(value) <= zaclr_string_length(text); ++offset)
+        {
+            matches = string_region_equals(text, offset, value);
+        }
+    }
+
+    zaclr_stack_value_reset(&this_value);
+    zaclr_stack_value_reset(&value_arg);
+    zaclr_stack_value_reset(&ignored_comparison);
+    return push_i4(frame, matches ? 1 : 0);
+}
+
+static struct zaclr_result invoke_string_compare_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value right_value = {};
+    struct zaclr_stack_value left_value = {};
+    struct zaclr_stack_value ignored_comparison = {};
+    struct zaclr_result result;
+
+    if (frame == NULL || frame->method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (frame->method->signature.parameter_count == 3u)
+    {
+        result = zaclr_eval_stack_pop(&frame->eval_stack, &ignored_comparison);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &right_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &left_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return push_i4(frame,
+                   string_compare_ordinal(string_from_stack_value(frame, &left_value),
+                                          string_from_stack_value(frame, &right_value)));
+}
+
+static struct zaclr_result invoke_string_transform_intrinsic(struct zaclr_frame* frame,
+                                                             zaclr_string_intrinsic_kind kind)
+{
+    struct zaclr_stack_value this_value = {};
+    const struct zaclr_string_desc* text;
+    uint32_t start = 0u;
+    uint32_t end;
+    uint32_t index;
+    uint16_t* buffer;
+    struct zaclr_result result;
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &this_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    text = string_from_stack_value(frame, &this_value);
+    if (text == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    end = zaclr_string_length(text);
+    if (kind == zaclr_string_intrinsic_kind::trim)
+    {
+        while (start < end && zaclr_string_char_at(text, start) == (uint16_t)' ')
+        {
+            ++start;
+        }
+        while (end > start && zaclr_string_char_at(text, end - 1u) == (uint16_t)' ')
+        {
+            --end;
+        }
+    }
+
+    buffer = end != start ? (uint16_t*)kernel_alloc(sizeof(uint16_t) * (end - start)) : NULL;
+    if (end != start && buffer == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_OUT_OF_MEMORY, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    for (index = 0u; index < end - start; ++index)
+    {
+        uint16_t character = zaclr_string_char_at(text, start + index);
+        if (kind == zaclr_string_intrinsic_kind::to_upper)
+        {
+            character = string_uppercase_ascii(character);
+        }
+        else if (kind == zaclr_string_intrinsic_kind::to_lower)
+        {
+            character = string_lowercase_ascii(character);
+        }
+        buffer[index] = character;
+    }
+
+    result = push_string_copy(frame, buffer, end - start);
+    if (buffer != NULL)
+    {
+        kernel_free(buffer);
+    }
+    return result;
+}
+
+static struct zaclr_result invoke_string_replace_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value new_value_arg = {};
+    struct zaclr_stack_value old_value_arg = {};
+    struct zaclr_stack_value this_value = {};
+    const struct zaclr_string_desc* text;
+    const struct zaclr_string_desc* old_value;
+    const struct zaclr_string_desc* new_value;
+    uint32_t capacity;
+    uint32_t out_length;
+    uint32_t index;
+    uint16_t* buffer;
+    struct zaclr_result result;
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &new_value_arg);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &old_value_arg);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &this_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    text = string_from_stack_value(frame, &this_value);
+    old_value = string_from_stack_value(frame, &old_value_arg);
+    new_value = string_from_stack_value(frame, &new_value_arg);
+    if (text == NULL || old_value == NULL || new_value == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (zaclr_string_length(old_value) == 0u)
+    {
+        return push_string_copy(frame, zaclr_string_code_units(text), zaclr_string_length(text));
+    }
+
+    capacity = (zaclr_string_length(text) + 1u) * (zaclr_string_length(new_value) + 1u);
+    buffer = capacity != 0u ? (uint16_t*)kernel_alloc(sizeof(uint16_t) * capacity) : NULL;
+    if (capacity != 0u && buffer == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_OUT_OF_MEMORY, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    out_length = 0u;
+    index = 0u;
+    while (index < zaclr_string_length(text))
+    {
+        uint32_t match_index;
+        bool matched = false;
+        if (index + zaclr_string_length(old_value) <= zaclr_string_length(text))
+        {
+            matched = true;
+            for (match_index = 0u; match_index < zaclr_string_length(old_value); ++match_index)
+            {
+                if (zaclr_string_char_at(text, index + match_index) != zaclr_string_char_at(old_value, match_index))
+                {
+                    matched = false;
+                    break;
+                }
+            }
+        }
+
+        if (matched)
+        {
+            for (match_index = 0u; match_index < zaclr_string_length(new_value); ++match_index)
+            {
+                buffer[out_length++] = zaclr_string_char_at(new_value, match_index);
+            }
+            index += zaclr_string_length(old_value);
+        }
+        else
+        {
+            buffer[out_length++] = zaclr_string_char_at(text, index);
+            ++index;
+        }
+    }
+
+    result = push_string_copy(frame, buffer, out_length);
+    if (buffer != NULL)
+    {
+        kernel_free(buffer);
+    }
+
+    zaclr_stack_value_reset(&this_value);
+    zaclr_stack_value_reset(&old_value_arg);
+    zaclr_stack_value_reset(&new_value_arg);
+    return result;
+}
+
+static struct zaclr_result invoke_string_indexof_char_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value needle_value = {};
+    struct zaclr_stack_value this_value = {};
+    const struct zaclr_string_desc* text;
+    uint32_t index;
+    int32_t needle;
+    struct zaclr_result result;
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &needle_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &this_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (needle_value.kind != ZACLR_STACK_VALUE_I4)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    text = string_from_stack_value(frame, &this_value);
+    if (text == NULL)
+    {
+        return push_i4(frame, -1);
+    }
+
+    needle = needle_value.data.i4;
+    for (index = 0u; index < zaclr_string_length(text); ++index)
+    {
+        if ((int32_t)zaclr_string_char_at(text, index) == needle)
+        {
+            return push_i4(frame, (int32_t)index);
+        }
+    }
+
+    return push_i4(frame, -1);
+}
+
+static struct zaclr_result invoke_string_intrinsic(struct zaclr_frame* frame,
+                                                   zaclr_string_intrinsic_kind kind)
+{
+    if (kind == zaclr_string_intrinsic_kind::starts_with
+        || kind == zaclr_string_intrinsic_kind::ends_with
+        || kind == zaclr_string_intrinsic_kind::contains)
+    {
+        return invoke_string_search_intrinsic(frame, kind);
+    }
+
+    if (kind == zaclr_string_intrinsic_kind::compare)
+    {
+        return invoke_string_compare_intrinsic(frame);
+    }
+
+    if (kind == zaclr_string_intrinsic_kind::to_upper
+        || kind == zaclr_string_intrinsic_kind::to_lower
+        || kind == zaclr_string_intrinsic_kind::trim)
+    {
+        return invoke_string_transform_intrinsic(frame, kind);
+    }
+
+    if (kind == zaclr_string_intrinsic_kind::replace)
+    {
+        return invoke_string_replace_intrinsic(frame);
+    }
+
+    if (kind == zaclr_string_intrinsic_kind::index_of_char)
+    {
+        return invoke_string_indexof_char_intrinsic(frame);
+    }
+
+    return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
 }
 
 static struct zaclr_result try_read_span_payload(struct zaclr_frame* frame,
@@ -3157,7 +4031,7 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
 
     if (is_unsafe_as_intrinsic(effective_type, method))
     {
-        return invoke_unsafe_as_intrinsic(frame);
+        return invoke_unsafe_as_intrinsic(frame, method);
     }
 
     if (is_unsafe_aspointer_intrinsic(effective_type, method))
@@ -3210,6 +4084,16 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
         return invoke_unsafe_skipinit_intrinsic(frame);
     }
 
+    if (is_unsafe_named_intrinsic(effective_type, method, "ReadUnaligned"))
+    {
+        return invoke_unsafe_read_unaligned_intrinsic(frame, method);
+    }
+
+    if (is_unsafe_named_intrinsic(effective_type, method, "WriteUnaligned"))
+    {
+        return invoke_unsafe_write_unaligned_intrinsic(frame, method);
+    }
+
     if (is_vector_ishardwareaccelerated_intrinsic(effective_type, method)
         || is_hardwareintrinsic_issupported_intrinsic(effective_type, method))
     {
@@ -3219,6 +4103,14 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
     if (is_inumberbase_isnegative_intrinsic(effective_type, method))
     {
         return invoke_inumberbase_isnegative_intrinsic(frame);
+    }
+
+    {
+        zaclr_string_intrinsic_kind string_intrinsic_kind = zaclr_string_intrinsic_kind::none;
+        if (try_get_string_runtime_intrinsic_kind(effective_type, method, &string_intrinsic_kind))
+        {
+            return invoke_string_intrinsic(frame, string_intrinsic_kind);
+        }
     }
 
     if (is_span_get_length_intrinsic(effective_type, method))

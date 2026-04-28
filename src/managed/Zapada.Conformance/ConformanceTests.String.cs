@@ -147,6 +147,8 @@ internal static partial class ConformanceTests
 
     private static void TestPathParsingLoops()
     {
+        Test("[TEST] Start:TestPathParsingLoops");
+
         string conf = "/CONF.DLL";
         string nested = "/SYS/CONF.DLL";
 
@@ -155,10 +157,13 @@ internal static partial class ConformanceTests
 
         if (CountSegmentSeparators(conf) == 1) Pass("[PASS] path parse separator count root"); else Fail("[FAIL] path parse separator count root");
         if (CountSegmentSeparators(nested) == 2) Pass("[PASS] path parse separator count nested"); else Fail("[FAIL] path parse separator count nested");
+
+        Test("[TEST] End:TestPathParsingLoops");
     }
 
     private static void TestStringSubstringPaths()
     {
+        Test("[TEST] Start:TestStringSubstringPaths");
         /*
          * Covers the exact string slicing shapes used by PathResolver.cs.
          *
@@ -167,9 +172,13 @@ internal static partial class ConformanceTests
          * ext  path  : name.Substring(dotIdx + 1)       — 1-arg overload
          */
         string path = "/BOOT/CONF.DLL";
+        Test("[TEST] S1:TestStringSubstringPaths");
         string name = path.Substring(6);          /* "CONF.DLL" */
+        Test("[TEST] S2:TestStringSubstringPaths");
         string basePart = name.Substring(0, 4);   /* "CONF" */
-        string extPart  = name.Substring(5);       /* "DLL" */
+        Test("[TEST] S3:TestStringSubstringPaths");
+        string extPart = name.Substring(5);       /* "DLL" */
+        Test("[TEST] S4:TestStringSubstringPaths");
 
         if (name.Length == 8 && name[0] == 'C' && name[4] == '.')
             Pass("[PASS] substring tail path");
@@ -185,6 +194,8 @@ internal static partial class ConformanceTests
             Pass("[PASS] substring ext path");
         else
             Fail("[FAIL] substring ext path");
+
+        Test("[TEST] End:TestStringSubstringPaths");
     }
 
     private static void TestChainedEqualityChecks()

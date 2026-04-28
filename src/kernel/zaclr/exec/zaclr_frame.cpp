@@ -413,14 +413,6 @@ namespace
             return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        console_write("[ZACLR][frame] init begin method_rva=");
-        console_write_hex64((uint64_t)method->rva);
-        console_write(" image_ptr=");
-        console_write_hex64((uint64_t)(uintptr_t)assembly->image.image.data);
-        console_write(" image_size=");
-        console_write_dec((uint64_t)assembly->image.image.size);
-        console_write("\n");
-
         if (method->rva == 0u)
         {
             return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
@@ -432,16 +424,8 @@ namespace
             return result;
         }
 
-        console_write("[ZACLR][frame] body_offset=");
-        console_write_dec((uint64_t)body_offset);
-        console_write("\n");
-
         body = assembly->image.image.data + body_offset;
         header = body[0];
-
-        console_write("[ZACLR][frame] header=");
-        console_write_hex64((uint64_t)header);
-        console_write("\n");
 
         frame = (struct zaclr_frame*)kernel_alloc(sizeof(struct zaclr_frame));
         if (frame == NULL)
@@ -727,12 +711,6 @@ extern "C" struct zaclr_result zaclr_frame_bind_arguments(struct zaclr_frame* fr
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
-
-    console_write("[ZACLR][frame] bind args frame_arg_count=");
-    console_write_dec((uint64_t)frame->argument_count);
-    console_write(" caller_depth=");
-    console_write_dec((uint64_t)caller_stack->depth);
-    console_write("\n");
 
     if (frame->method != NULL
         && frame->method->name.text != NULL

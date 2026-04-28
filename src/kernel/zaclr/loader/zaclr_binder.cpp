@@ -141,16 +141,7 @@ extern "C" struct zaclr_result zaclr_binder_bind(struct zaclr_loader* loader,
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_LOADER);
     }
 
-    console_write("[ZACLR][binder] bind begin name=");
-    console_write(identity->name);
-    console_write(" domain=");
-    console_write_dec((uint64_t)domain->id);
-    console_write("\n");
-
     assembly = zaclr_assembly_registry_find_by_name(&domain->registry, identity->name);
-    console_write("[ZACLR][binder] domain registry result=");
-    console_write(assembly != NULL ? "hit" : "miss");
-    console_write("\n");
     if (assembly != NULL)
     {
         *out_assembly = assembly;

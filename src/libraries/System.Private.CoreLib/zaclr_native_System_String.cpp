@@ -521,6 +521,11 @@ struct zaclr_result zaclr_native_System_String::StartsWith___BOOLEAN__STRING(str
     return zaclr_native_call_frame_set_bool(&frame, string_starts_with(value, prefix));
 }
 
+struct zaclr_result zaclr_native_System_String::StartsWith___BOOLEAN__STRING__VALUETYPE_System_StringComparison(struct zaclr_native_call_frame& frame)
+{
+    return StartsWith___BOOLEAN__STRING(frame);
+}
+
 struct zaclr_result zaclr_native_System_String::EndsWith___BOOLEAN__STRING(struct zaclr_native_call_frame& frame)
 {
     const struct zaclr_string_desc* value;

@@ -1,5 +1,6 @@
 #include <kernel/zaclr/include/zaclr_trace.h>
 
+#include <kernel/zaclr/diag/zaclr_trace_events.h>
 #include <kernel/zaclr/host/zaclr_host.h>
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
 
@@ -38,6 +39,16 @@ namespace
 extern "C" void zaclr_trace_emit(const struct zaclr_runtime* runtime, const struct zaclr_trace_record* record)
 {
     if (runtime == NULL || record == NULL || runtime->state.host == NULL || runtime->state.host->write_text == NULL)
+    {
+        return;
+    }
+
+    if (record->event_id == ZACLR_TRACE_EVENT_CALL_TARGET
+        || record->event_id == ZACLR_TRACE_EVENT_METHOD_RVA
+        || record->event_id == ZACLR_TRACE_EVENT_OPCODE_STEP
+        || record->event_id == ZACLR_TRACE_EVENT_OPCODE_RAW
+        || record->event_id == ZACLR_TRACE_EVENT_FRAME_PUSH
+        || record->event_id == ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND)
     {
         return;
     }

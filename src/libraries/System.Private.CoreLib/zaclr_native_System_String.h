@@ -30,6 +30,9 @@ struct zaclr_native_System_String
     static struct zaclr_result StartsWith___BOOLEAN__STRING(
         struct zaclr_native_call_frame& frame);
 
+    static struct zaclr_result StartsWith___BOOLEAN__STRING__VALUETYPE_System_StringComparison(
+        struct zaclr_native_call_frame& frame);
+
     static struct zaclr_result EndsWith___BOOLEAN__STRING(
         struct zaclr_native_call_frame& frame);
 

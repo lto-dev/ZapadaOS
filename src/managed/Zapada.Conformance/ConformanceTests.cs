@@ -25,6 +25,7 @@
  * generates div.un.  uint % uint generates rem.un.
  */
 
+using System;
 using Zapada.Conformance.Runtime;
 
 namespace Zapada.Conformance;
@@ -62,7 +63,12 @@ internal static partial class ConformanceTests
         /* Gap #2: static field 64-bit sentinels */
         InitStaticFieldSentinels();
     }
-
+    private static void Test(string name)
+    {
+        InternalCalls.Write("[Conf] TEST ");
+        InternalCalls.Write(name);
+        InternalCalls.Write("\n");
+    }
     private static void Pass(string name)
     {
         InternalCalls.Write("[Conf] PASS ");
@@ -90,120 +96,129 @@ internal static partial class ConformanceTests
      */
     internal static int Run()
     {
-        Initialize();
+        //try
+        //{
+            Initialize();
 
-        /* GC first so runtime verification reaches GC before broader CoreLib string coverage. */
-        TestGcBasic();
-        TestGcHandleBasics();
-        TestWeakHandleBasic();
-        TestLdtokenTypeIdentity();
-        TestFinalizationBasics();
-        TestSuppressFinalize();
-        TestReRegisterForFinalize();
+            /* GC first so runtime verification reaches GC before broader CoreLib string coverage. */
+            TestGcBasic();
+            TestGcHandleBasics();
+            TestWeakHandleBasic();
+            TestLdtokenTypeIdentity();
+            TestFinalizationBasics();
+            TestSuppressFinalize();
+            TestReRegisterForFinalize();
 
-        /* Branch / bitwise */
-        TestBgeUn();
-        TestBgtUn();
-        TestBleBlUn();
-        TestSwitch();
-        TestBeqBneUn();
-        TestBitwiseOps();
-        TestSignedBranches();
-        TestBrBrfalseBrtrue();
+            /* Branch / bitwise */
+            TestBgeUn();
+            TestBgtUn();
+            TestBleBlUn();
+            TestSwitch();
+            TestBeqBneUn();
+            TestBitwiseOps();
+            TestSignedBranches();
+            TestBrBrfalseBrtrue();
 
-        /* Arithmetic / conversion */
-        TestShrUn();
-        TestDivRemUn();
-        TestConvOps();
-        TestCmpOps();
-        TestSignedDivRem();
-        TestCheckedArithmetic();
-        TestFloatArithmetic();
-        TestNop();
+            /* Arithmetic / conversion */
+            TestShrUn();
+            TestDivRemUn();
+            TestConvOps();
+            TestCmpOps();
+            TestSignedDivRem();
+            TestCheckedArithmetic();
+            TestFloatArithmetic();
+            TestNop();
 
-        /* Stack / argument round-trips */
-        TestDupPop();
-        TestArgRoundTrips();
+            /* Stack / argument round-trips */
+            TestDupPop();
+            TestArgRoundTrips();
 
-        /* Array / local */
-        TestArrayHelperLoops();
-        TestIndexedArrayRoundTrips();
+            /* Array / local */
+            TestArrayHelperLoops();
+            TestIndexedArrayRoundTrips();
 
-        /* String / path */
-        TestStringIndexingAndBranches();
-        TestPathParsingLoops();
-        TestStringSubstringPaths();
-        TestChainedEqualityChecks();
-        TestUtf16LiteralAndIndexing();
-        TestCoreLibStringContractBasics();
-        /* Object model */
-        TestBoxingAndTypeChecks();
+            /* String / path */
+            TestStringIndexingAndBranches();
+            TestPathParsingLoops();
+            TestStringSubstringPaths();
+            TestChainedEqualityChecks();
+            TestUtf16LiteralAndIndexing();
+            TestCoreLibStringContractBasics();
+            /* Object model */
+            TestBoxingAndTypeChecks();
 
-        /* BCL string methods */
-        TestStringStartsWith();
-        TestStringEndsWith();
-        TestStringContains();
-        TestStringCompare();
-        TestStringToUpper();
-        TestStringToLower();
-        TestStringTrim();
-        TestStringReplace();
-        TestUtf16BclBehaviors();
-        TestCoreLibStringBehaviorShapes();
+            /* BCL string methods */
+            TestStringStartsWith();
+            TestStringEndsWith();
+            TestStringContains();
+            TestStringCompare();
+            TestStringToUpper();
+            TestStringToLower();
+            TestStringTrim();
+            TestStringReplace();
+            TestUtf16BclBehaviors();
+            TestCoreLibStringBehaviorShapes();
 
-        /* I8 */
-        TestI8Arithmetic();
-        TestI8Bitwise();
-        TestI8Shifts();
-        TestI8Branches();
+            /* I8 */
+            TestI8Arithmetic();
+            TestI8Bitwise();
+            TestI8Shifts();
+            TestI8Branches();
 
-        /* Static constructor */
-        TestStaticConstructor();
+            /* Static constructor */
+            TestStaticConstructor();
 
-        /* Gap #2: static field 64-bit layout (ldsfld/stsfld I8 round-trip) */
-        TestStaticI8Field();
+            /* Gap #2: static field 64-bit layout (ldsfld/stsfld I8 round-trip) */
+            TestStaticI8Field();
 
-        /* Gap #1: MethodSpec — generic method calls */
-        TestGenericMethods();
+            /* Gap #1: MethodSpec — generic method calls */
+            TestGenericMethods();
 
-        /* Gap #4 + Gap #13: exception type matching + isinst inheritance */
-        TestExceptionTypeCatch();
-        TestIsinstInheritance();
+            /* Gap #4 + Gap #13: exception type matching + isinst inheritance */
+            TestExceptionTypeCatch();
+            TestIsinstInheritance();
 
-        /* Gap #3: callvirt overload dispatch by param count */
-        TestCallvirtOverloadDispatch();
+            /* Gap #3: callvirt overload dispatch by param count */
+            TestCallvirtOverloadDispatch();
 
-        /* sizeof primitive constants + ldtoken type identity */
-        TestSizeofOps();
-        TestLdtokenTypeIdentity();
+            /* sizeof primitive constants + ldtoken type identity */
+            TestSizeofOps();
+            TestLdtokenTypeIdentity();
 
-        /* Abstract callvirt dispatch (callvirt on abstract base override) */
-        TestAbstractCallvirt();
+            /* Abstract callvirt dispatch (callvirt on abstract base override) */
+            TestAbstractCallvirt();
 
-        /* Phase A/B: cross-assembly fields, static fields, and virtual dispatch */
-        TestCrossAssemblyFieldAndDispatch();
+            /* Phase A/B: cross-assembly fields, static fields, and virtual dispatch */
+            TestCrossAssemblyFieldAndDispatch();
 
-        /* Phase H: delegate and lambda support */
-        TestDelegates();
+            /* Phase H: delegate and lambda support */
+            TestDelegates();
 
-        /* Phase I: interface dispatch */
-        TestInterfaceDispatch();
+            /* Phase I: interface dispatch */
+            TestInterfaceDispatch();
 
-        /* Phase J: exception handling completeness */
-        TestEhNestedFinallyLeave();
-        TestEhNestedFinallyThrowCatch();
-        TestEhFilterClause();
-        TestEhFilterRejectFallsThrough();
-        TestEhCatchInsideFinallySequence();
-        TestEhNestedCatchSelection();
+            /* Phase J: exception handling completeness */
+            TestEhNestedFinallyLeave();
+            TestEhNestedFinallyThrowCatch();
+            TestEhFilterClause();
+            TestEhFilterRejectFallsThrough();
+            TestEhCatchInsideFinallySequence();
+            TestEhNestedCatchSelection();
 
-        /* Generic owner / runtime identity tests moved late to isolate whether
-         * they trigger corruption in earlier conformance groups. */
-        TestCoreLibGenericEmptyArrayShapes();
-        TestGenericStaticFieldIsolation();
-        TestGenericStaticMethodOwnerResolution();
-        TestGenericInstanceMethodOwnerResolution();
-        TestNestedGenericOwnerIdentity();
+            /* Generic owner / runtime identity tests moved late to isolate whether
+             * they trigger corruption in earlier conformance groups. */
+            TestCoreLibGenericEmptyArrayShapes();
+            TestGenericStaticFieldIsolation();
+            TestGenericStaticMethodOwnerResolution();
+            TestGenericInstanceMethodOwnerResolution();
+            TestNestedGenericOwnerIdentity();
+        //}
+        //catch (Exception ex)
+        //{
+        //    InternalCalls.Write("[Conf] [Exception]");
+        //    InternalCalls.Write(ex.Message);
+        //    InternalCalls.Write("\n");
+        //}
 
         InternalCalls.Write("[Conf] pass=");
         InternalCalls.WriteInt(s_pass);

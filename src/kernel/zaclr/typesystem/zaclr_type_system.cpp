@@ -497,49 +497,22 @@ extern "C" struct zaclr_result zaclr_type_system_resolve_external_named_type(str
     *out_assembly = NULL;
     *out_type = NULL;
 
-    console_write("[ZACLR][typesystem] resolve_external begin asm=");
-    console_write(preferred_assembly_name != NULL ? preferred_assembly_name : "<null>");
-    console_write(" ns=");
-    console_write(name->type_namespace != NULL ? name->type_namespace : "<null>");
-    console_write(" type=");
-    console_write(name->type_name != NULL ? name->type_name : "<null>");
-    console_write("\n");
-
     if (preferred_assembly_name != NULL)
     {
-        console_write("[ZACLR][typesystem] binder_bind enter\n");
         result = bind_domain_assembly(runtime, preferred_assembly_name, out_assembly);
-        console_write("[ZACLR][typesystem] binder status=");
-        console_write_dec((uint64_t)result.status);
-        console_write("\n");
         if (result.status == ZACLR_STATUS_OK)
         {
-            console_write("[ZACLR][typesystem] binder assembly ptr=");
-            console_write_hex64((uint64_t)(uintptr_t)(*out_assembly));
-            console_write("\n");
-            console_write("[ZACLR][typesystem] binder assembly=");
-            console_write(*out_assembly != NULL && (*out_assembly)->assembly_name.text != NULL ? (*out_assembly)->assembly_name.text : "<null>");
-            console_write(" count=");
-            console_write_dec((uint64_t)(*out_assembly != NULL ? (*out_assembly)->type_map.count : 0u));
-            console_write("\n");
             *out_type = zaclr_type_system_find_type_by_name(*out_assembly, name);
-            console_write("[ZACLR][typesystem] find_type result=");
-            console_write(*out_type != NULL && (*out_type)->type_name.text != NULL ? (*out_type)->type_name.text : "<null>");
-            console_write("\n");
             if (*out_type != NULL)
             {
                 return zaclr_result_ok();
             }
 
-            console_write("[ZACLR][typesystem] trying forwarder\n");
             result = zaclr_type_system_resolve_exported_type_forwarder(*out_assembly,
                                                                        runtime,
                                                                        name,
                                                                        out_assembly,
                                                                        out_type);
-            console_write("[ZACLR][typesystem] forwarder status=");
-            console_write_dec((uint64_t)result.status);
-            console_write("\n");
             if (result.status == ZACLR_STATUS_OK)
             {
                 return result;
