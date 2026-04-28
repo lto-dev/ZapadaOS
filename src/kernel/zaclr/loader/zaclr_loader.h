@@ -4,12 +4,23 @@
 #include <kernel/zaclr/loader/zaclr_pe_image.h>
 #include <kernel/zaclr/metadata/zaclr_metadata_reader.h>
 #include <kernel/zaclr/exec/zaclr_eval_stack.h>
+#include <kernel/zaclr/typesystem/zaclr_generic_context.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 struct zaclr_method_table;
+
+struct zaclr_generic_static_field_slot {
+    uint32_t field_row;
+    uint8_t initializer_state;
+    uint8_t reserved0;
+    uint16_t reserved1;
+    struct zaclr_generic_context owner_context;
+    struct zaclr_stack_value value;
+    struct zaclr_generic_static_field_slot* next;
+};
 
 struct zaclr_loaded_assembly {
     zaclr_assembly_id id;
@@ -19,10 +30,12 @@ struct zaclr_loaded_assembly {
     struct zaclr_type_map type_map;
     char* assembly_name_storage;
     struct zaclr_stack_value* static_fields;
+    struct zaclr_generic_static_field_slot* generic_static_fields;
     zaclr_object_handle* runtime_type_cache;
     uint8_t* type_initializer_state;
     struct zaclr_method_table** method_table_cache;  /* indexed by (typedef_row - 1) */
     uint32_t static_field_count;
+    uint32_t generic_static_field_count;
     uint32_t runtime_type_cache_count;
     uint32_t method_table_cache_count;
     struct zaclr_name_view assembly_name;

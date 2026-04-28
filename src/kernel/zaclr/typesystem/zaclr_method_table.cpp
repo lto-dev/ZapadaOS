@@ -15,6 +15,55 @@ namespace
         return *a == *b;
     }
 
+    static uint32_t text_length(const char* text)
+    {
+        uint32_t length = 0u;
+        if (text == NULL)
+        {
+            return 0u;
+        }
+
+        while (text[length] != '\0')
+        {
+            ++length;
+        }
+
+        return length;
+    }
+
+    static bool virtual_method_name_matches(const char* slot_name,
+                                            const char* declared_name)
+    {
+        uint32_t slot_length;
+        uint32_t declared_length;
+        uint32_t suffix_start;
+
+        if (slot_name == NULL || declared_name == NULL)
+        {
+            return false;
+        }
+
+        if (text_equals(slot_name, declared_name))
+        {
+            return true;
+        }
+
+        slot_length = text_length(slot_name);
+        declared_length = text_length(declared_name);
+        if (slot_length <= declared_length + 1u)
+        {
+            return false;
+        }
+
+        suffix_start = slot_length - declared_length;
+        if (slot_name[suffix_start - 1u] != '.')
+        {
+            return false;
+        }
+
+        return text_equals(slot_name + suffix_start, declared_name);
+    }
+
     static bool virtual_slot_matches_declared_method(const struct zaclr_method_desc* slot,
                                                      const struct zaclr_method_desc* declared_method)
     {
@@ -22,7 +71,7 @@ namespace
             || declared_method == NULL
             || slot->name.text == NULL
             || declared_method->name.text == NULL
-            || !text_equals(slot->name.text, declared_method->name.text))
+            || !virtual_method_name_matches(slot->name.text, declared_method->name.text))
         {
             return false;
         }

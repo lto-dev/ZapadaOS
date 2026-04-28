@@ -665,6 +665,15 @@ extern "C" struct zaclr_result zaclr_boxed_value_allocate(struct zaclr_heap* hea
                                                              const struct zaclr_stack_value* value,
                                                              struct zaclr_boxed_value_desc** out_value)
 {
+    return zaclr_boxed_value_allocate_in_assembly(heap, NULL, token, value, out_value);
+}
+
+extern "C" struct zaclr_result zaclr_boxed_value_allocate_in_assembly(struct zaclr_heap* heap,
+                                                                         const struct zaclr_loaded_assembly* owning_assembly,
+                                                                         struct zaclr_token token,
+                                                                         const struct zaclr_stack_value* value,
+                                                                         struct zaclr_boxed_value_desc** out_value)
+{
     struct zaclr_boxed_value_desc* boxed_value;
     struct zaclr_result result;
 
@@ -676,7 +685,7 @@ extern "C" struct zaclr_result zaclr_boxed_value_allocate(struct zaclr_heap* hea
     *out_value = NULL;
     result = zaclr_heap_allocate_object(heap,
                                         sizeof(struct zaclr_boxed_value_desc),
-                                        NULL,
+                                        owning_assembly,
                                         0u,
                                         ZACLR_OBJECT_FAMILY_INSTANCE,
                                         ZACLR_OBJECT_FLAG_BOXED_VALUE,
@@ -698,6 +707,15 @@ extern "C" struct zaclr_result zaclr_boxed_value_allocate_handle(struct zaclr_he
                                                                     const struct zaclr_stack_value* value,
                                                                     zaclr_object_handle* out_handle)
 {
+    return zaclr_boxed_value_allocate_handle_in_assembly(heap, NULL, token, value, out_handle);
+}
+
+extern "C" struct zaclr_result zaclr_boxed_value_allocate_handle_in_assembly(struct zaclr_heap* heap,
+                                                                                const struct zaclr_loaded_assembly* owning_assembly,
+                                                                                struct zaclr_token token,
+                                                                                const struct zaclr_stack_value* value,
+                                                                                zaclr_object_handle* out_handle)
+{
     struct zaclr_boxed_value_desc* boxed_value;
     struct zaclr_result result;
 
@@ -707,7 +725,7 @@ extern "C" struct zaclr_result zaclr_boxed_value_allocate_handle(struct zaclr_he
     }
 
     *out_handle = 0u;
-    result = zaclr_boxed_value_allocate(heap, token, value, &boxed_value);
+    result = zaclr_boxed_value_allocate_in_assembly(heap, owning_assembly, token, value, &boxed_value);
     if (result.status != ZACLR_STATUS_OK)
     {
         return result;

@@ -88,10 +88,20 @@ struct zaclr_result zaclr_boxed_value_allocate(struct zaclr_heap* heap,
                                                struct zaclr_token token,
                                                const struct zaclr_stack_value* value,
                                                struct zaclr_boxed_value_desc** out_value);
+struct zaclr_result zaclr_boxed_value_allocate_in_assembly(struct zaclr_heap* heap,
+                                                           const struct zaclr_loaded_assembly* owning_assembly,
+                                                           struct zaclr_token token,
+                                                           const struct zaclr_stack_value* value,
+                                                           struct zaclr_boxed_value_desc** out_value);
 struct zaclr_result zaclr_boxed_value_allocate_handle(struct zaclr_heap* heap,
                                                       struct zaclr_token token,
                                                       const struct zaclr_stack_value* value,
                                                       zaclr_object_handle* out_handle);
+struct zaclr_result zaclr_boxed_value_allocate_handle_in_assembly(struct zaclr_heap* heap,
+                                                                  const struct zaclr_loaded_assembly* owning_assembly,
+                                                                  struct zaclr_token token,
+                                                                  const struct zaclr_stack_value* value,
+                                                                  zaclr_object_handle* out_handle);
 struct zaclr_boxed_value_desc* zaclr_boxed_value_from_handle(struct zaclr_heap* heap,
                                                              zaclr_object_handle handle);
 const struct zaclr_boxed_value_desc* zaclr_boxed_value_from_handle_const(const struct zaclr_heap* heap,

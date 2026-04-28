@@ -11,6 +11,7 @@
 #include <kernel/zaclr/heap/zaclr_string.h>
 #include <kernel/zaclr/metadata/zaclr_metadata_reader.h>
 #include <kernel/zaclr/runtime/zaclr_runtime.h>
+#include <kernel/zaclr/typesystem/zaclr_delegate_runtime.h>
 #include <kernel/zaclr/typesystem/zaclr_field_layout.h>
 #include <kernel/zaclr/typesystem/zaclr_method_table.h>
 #include <kernel/zaclr/typesystem/zaclr_type_prepare.h>
@@ -876,6 +877,48 @@ namespace
             && text_equals(type->type_name.text, "GC")
             && text_equals(method->name.text, "KeepAlive")
             && method->signature.parameter_count == 1u;
+    }
+
+    static bool is_delegate_combine_intrinsic(const struct zaclr_type_desc* type,
+                                              const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System")
+            && text_equals(type->type_name.text, "Delegate")
+            && text_equals(method->name.text, "Combine")
+            && method->signature.parameter_count == 2u;
+    }
+
+    static bool is_delegate_remove_intrinsic(const struct zaclr_type_desc* type,
+                                             const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System")
+            && text_equals(type->type_name.text, "Delegate")
+            && text_equals(method->name.text, "Remove")
+            && method->signature.parameter_count == 2u;
+    }
+
+    static bool is_delegate_equality_operator_intrinsic(const struct zaclr_type_desc* type,
+                                                        const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(type->type_namespace.text, "System")
+            && text_equals(type->type_name.text, "Delegate")
+            && (text_equals(method->name.text, "op_Equality") || text_equals(method->name.text, "op_Inequality"))
+            && method->signature.parameter_count == 2u;
     }
 
     static bool is_methodtable_hasfinalizer_intrinsic(const struct zaclr_type_desc* type,
@@ -2882,13 +2925,120 @@ static struct zaclr_result invoke_runtimehelpers_isknownconstant_intrinsic(struc
 static struct zaclr_result invoke_gc_keepalive_intrinsic(struct zaclr_frame* frame)
 {
     struct zaclr_stack_value ignored = {};
-
     if (frame == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
     return zaclr_eval_stack_pop(&frame->eval_stack, &ignored);
+}
+
+static struct zaclr_result invoke_delegate_combine_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value right = {};
+    struct zaclr_stack_value left = {};
+    struct zaclr_stack_value result_value = {};
+    struct zaclr_result result;
+
+    if (frame == NULL || frame->runtime == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &right);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &left);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_delegate_runtime_combine(frame->runtime, &left, &right, &result_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_eval_stack_push(&frame->eval_stack, &result_value);
+}
+
+static struct zaclr_result invoke_delegate_remove_intrinsic(struct zaclr_frame* frame)
+{
+    struct zaclr_stack_value value = {};
+    struct zaclr_stack_value source = {};
+    struct zaclr_stack_value result_value = {};
+    struct zaclr_result result;
+
+    if (frame == NULL || frame->runtime == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &source);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_delegate_runtime_remove(frame->runtime, &source, &value, &result_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    return zaclr_eval_stack_push(&frame->eval_stack, &result_value);
+}
+
+static struct zaclr_result invoke_delegate_equality_operator_intrinsic(struct zaclr_frame* frame,
+                                                                       const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value right = {};
+    struct zaclr_stack_value left = {};
+    struct zaclr_stack_value result_value = {};
+    uint8_t equal = 0u;
+    struct zaclr_result result;
+
+    if (frame == NULL || frame->runtime == NULL || method == NULL || method->name.text == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &right);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &left);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_delegate_runtime_equals(frame->runtime, &left, &right, &equal);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (text_equals(method->name.text, "op_Inequality"))
+    {
+        equal = equal == 0u ? 1u : 0u;
+    }
+
+    result_value.kind = ZACLR_STACK_VALUE_I4;
+    result_value.data.i4 = equal != 0u ? 1 : 0;
+    return zaclr_eval_stack_push(&frame->eval_stack, &result_value);
 }
 
 static struct zaclr_result invoke_runtimehelpers_isbitwiseequatable_intrinsic(struct zaclr_frame* frame)
@@ -4166,6 +4316,21 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
     if (is_gc_keepalive_intrinsic(effective_type, method))
     {
         return invoke_gc_keepalive_intrinsic(frame);
+    }
+
+    if (is_delegate_combine_intrinsic(effective_type, method))
+    {
+        return invoke_delegate_combine_intrinsic(frame);
+    }
+
+    if (is_delegate_remove_intrinsic(effective_type, method))
+    {
+        return invoke_delegate_remove_intrinsic(frame);
+    }
+
+    if (is_delegate_equality_operator_intrinsic(effective_type, method))
+    {
+        return invoke_delegate_equality_operator_intrinsic(frame, method);
     }
 
     if (is_methodtable_hasfinalizer_intrinsic(effective_type, method))

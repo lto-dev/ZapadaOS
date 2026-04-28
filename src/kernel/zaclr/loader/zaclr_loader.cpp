@@ -178,12 +178,28 @@ extern "C" struct zaclr_result zaclr_loader_apply_assembly_name_fallback(struct 
 
 extern "C" void zaclr_loader_release_loaded_assembly(struct zaclr_loaded_assembly* loaded_assembly)
 {
+    struct zaclr_generic_static_field_slot* generic_slot;
+
     if (loaded_assembly == NULL) {
         return;
     }
 
     if (loaded_assembly->static_fields != NULL) {
+        uint32_t index;
+        for (index = 0u; index < loaded_assembly->static_field_count; ++index) {
+            zaclr_stack_value_reset(&loaded_assembly->static_fields[index]);
+        }
+
         kernel_free(loaded_assembly->static_fields);
+    }
+
+    generic_slot = loaded_assembly->generic_static_fields;
+    while (generic_slot != NULL) {
+        struct zaclr_generic_static_field_slot* next = generic_slot->next;
+        zaclr_stack_value_reset(&generic_slot->value);
+        zaclr_generic_context_reset(&generic_slot->owner_context);
+        kernel_free(generic_slot);
+        generic_slot = next;
     }
 
     if (loaded_assembly->type_initializer_state != NULL) {

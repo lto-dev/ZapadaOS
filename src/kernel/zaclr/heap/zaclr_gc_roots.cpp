@@ -30,6 +30,8 @@ namespace
     static void zaclr_gc_enumerate_assembly_static_roots(const struct zaclr_loaded_assembly* assembly,
                                                          struct zaclr_gc_root_visitor* visitor)
     {
+        struct zaclr_generic_static_field_slot* generic_slot;
+
         if (assembly == NULL || visitor == NULL)
         {
             return;
@@ -37,8 +39,18 @@ namespace
 
         zaclr_gc_visit_stack_values(assembly->static_fields,
                                     assembly->static_field_count,
-                                    ZACLR_GC_ROOT_FLAG_STATIC,
-                                    visitor);
+                                     ZACLR_GC_ROOT_FLAG_STATIC,
+                                     visitor);
+
+        for (generic_slot = assembly->generic_static_fields;
+             generic_slot != NULL;
+             generic_slot = generic_slot->next)
+        {
+            zaclr_gc_visit_stack_values(&generic_slot->value,
+                                        1u,
+                                        ZACLR_GC_ROOT_FLAG_STATIC,
+                                        visitor);
+        }
 
         if (visitor->visit_object_reference != NULL)
         {

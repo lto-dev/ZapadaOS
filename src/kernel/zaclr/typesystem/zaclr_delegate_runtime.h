@@ -33,6 +33,18 @@ struct zaclr_result zaclr_delegate_runtime_bind_singlecast(struct zaclr_runtime*
                                                            const struct zaclr_type_desc* delegate_type,
                                                            const struct zaclr_stack_value* target_value,
                                                            const struct zaclr_method_handle* method_handle);
+struct zaclr_result zaclr_delegate_runtime_combine(struct zaclr_runtime* runtime,
+                                                   const struct zaclr_stack_value* left,
+                                                   const struct zaclr_stack_value* right,
+                                                   struct zaclr_stack_value* out_value);
+struct zaclr_result zaclr_delegate_runtime_remove(struct zaclr_runtime* runtime,
+                                                  const struct zaclr_stack_value* source,
+                                                  const struct zaclr_stack_value* value,
+                                                  struct zaclr_stack_value* out_value);
+struct zaclr_result zaclr_delegate_runtime_equals(struct zaclr_runtime* runtime,
+                                                  const struct zaclr_stack_value* left,
+                                                  const struct zaclr_stack_value* right,
+                                                  uint8_t* out_equal);
 
 #ifdef __cplusplus
 }

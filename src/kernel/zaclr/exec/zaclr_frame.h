@@ -32,6 +32,15 @@ struct zaclr_frame {
     struct zaclr_eval_stack eval_stack;
     struct zaclr_generic_context generic_context;
     uint32_t pending_constrained_token_raw;
+    uint32_t pending_filter_handler_offset;
+    uint32_t pending_filter_next_clause_index;
+    uint32_t pending_filter_throw_offset;
+    zaclr_object_handle pending_filter_exception_handle;
+    uint32_t pending_finally_kind;
+    uint32_t pending_finally_next_clause_index;
+    uint32_t pending_finally_source_offset;
+    uint32_t pending_finally_leave_target;
+    zaclr_object_handle pending_finally_exception_handle;
     uint32_t flags;
 };
 
