@@ -96,6 +96,91 @@ namespace
         return zaclr_binder_bind(&runtime->loader, domain, &identity, out_assembly);
     }
 
+    static bool text_ends_with(const char* text, const char* suffix)
+    {
+        uint32_t text_length = 0u;
+        uint32_t suffix_length = 0u;
+        uint32_t index;
+
+        if (text == NULL || suffix == NULL)
+        {
+            return false;
+        }
+
+        while (text[text_length] != '\0')
+        {
+            ++text_length;
+        }
+
+        while (suffix[suffix_length] != '\0')
+        {
+            ++suffix_length;
+        }
+
+        if (suffix_length > text_length)
+        {
+            return false;
+        }
+
+        for (index = 0u; index < suffix_length; ++index)
+        {
+            if (text[text_length - suffix_length + index] != suffix[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static bool memberref_owner_matches_type(const struct zaclr_type_desc* type,
+                                             const struct zaclr_member_name_ref* name)
+    {
+        if (type == NULL || name == NULL || type->type_name.text == NULL || name->type_name == NULL)
+        {
+            return false;
+        }
+
+        if (name->type_namespace == NULL)
+        {
+            return type->type_namespace.length == 0u
+                && zaclr_text_equals(type->type_name.text, name->type_name);
+        }
+
+        if (!zaclr_text_equals(type->type_name.text, name->type_name)
+            && !text_ends_with(type->type_name.text, name->type_name)
+            && !text_ends_with(name->type_name, type->type_name.text))
+        {
+            return false;
+        }
+
+        return zaclr_text_equals(type->type_namespace.text, name->type_namespace)
+            || text_ends_with(name->type_namespace, type->type_namespace.text)
+            || text_ends_with(type->type_namespace.text, name->type_namespace);
+    }
+
+    static const struct zaclr_type_desc* find_memberref_owner_type(const struct zaclr_loaded_assembly* assembly,
+                                                                   const struct zaclr_member_name_ref* name)
+    {
+        uint32_t type_index;
+
+        if (assembly == NULL || name == NULL)
+        {
+            return NULL;
+        }
+
+        for (type_index = 0u; type_index < assembly->type_map.count; ++type_index)
+        {
+            const struct zaclr_type_desc* type = &assembly->type_map.types[type_index];
+            if (memberref_owner_matches_type(type, name))
+            {
+                return type;
+            }
+        }
+
+        return NULL;
+    }
+
     static uint16_t read_u16(const uint8_t* data)
     {
         return (uint16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8));
@@ -592,7 +677,7 @@ extern "C" struct zaclr_result zaclr_member_resolution_resolve_field(const struc
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_METADATA);
     }
 
-    target_type = zaclr_type_system_find_type_by_name(*out_assembly, &memberref->key);
+    target_type = find_memberref_owner_type(*out_assembly, &memberref->key);
     if (target_type == NULL)
     {
         struct zaclr_result result = zaclr_type_system_resolve_exported_type_forwarder(*out_assembly,

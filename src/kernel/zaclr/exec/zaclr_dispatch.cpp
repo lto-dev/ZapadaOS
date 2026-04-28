@@ -1168,16 +1168,56 @@ namespace
 
         if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_MEMBERREF))
         {
+            bool trace_delegate_stsfld = frame->method != NULL
+                && frame->method->name.text != NULL
+                && text_equals(frame->method->name.text, "TestDelegates");
+
             result = zaclr_metadata_get_memberref_info(frame->assembly, token, &memberref);
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
             }
 
+            if (trace_delegate_stsfld)
+            {
+                console_write("[ZACLR][stsfld] token=");
+                console_write_hex64((uint64_t)token.raw);
+                console_write(" class_token=");
+                console_write_hex64((uint64_t)memberref.class_token);
+                console_write(" assembly=");
+                console_write(memberref.assembly_name != NULL ? memberref.assembly_name : "<null>");
+                console_write(" owner=");
+                console_write(memberref.key.type_namespace != NULL ? memberref.key.type_namespace : "<null-ns>");
+                console_write(".");
+                console_write(memberref.key.type_name != NULL ? memberref.key.type_name : "<null-type>");
+                console_write(" field=");
+                console_write(memberref.key.method_name != NULL ? memberref.key.method_name : "<null-field>");
+                console_write("\n");
+            }
+
             result = zaclr_member_resolution_resolve_field(frame->runtime,
                                                            &memberref,
                                                            &target_assembly,
                                                            &target_field_row);
+            if (trace_delegate_stsfld)
+            {
+                const struct zaclr_type_desc* target_owner = target_assembly != NULL
+                    ? find_field_owner_type(target_assembly, target_field_row)
+                    : NULL;
+                console_write("[ZACLR][stsfld] resolve status=");
+                console_write_dec((uint64_t)result.status);
+                console_write(" category=");
+                console_write_dec((uint64_t)result.category);
+                console_write(" target_assembly=");
+                console_write(target_assembly != NULL && target_assembly->assembly_name.text != NULL ? target_assembly->assembly_name.text : "<null>");
+                console_write(" field_row=");
+                console_write_dec((uint64_t)target_field_row);
+                console_write(" owner=");
+                console_write(target_owner != NULL && target_owner->type_namespace.text != NULL ? target_owner->type_namespace.text : "<null-ns>");
+                console_write(".");
+                console_write(target_owner != NULL && target_owner->type_name.text != NULL ? target_owner->type_name.text : "<null-type>");
+                console_write("\n");
+            }
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
