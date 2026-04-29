@@ -48,7 +48,7 @@ public static class DllMain
             Console.Write("[VFS] Read mismatch\n");
         }
 
-        return 0;
+        return 1;
     }
 }
 

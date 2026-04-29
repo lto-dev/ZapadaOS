@@ -4,7 +4,7 @@
  * Phase 3.1 D.3: FAT32 filesystem driver entry point.
  *
  * DllMain.Initialize() is invoked by BootLoader.cs via RuntimeCallMethod
- * after FAT32.DLL is loaded from the ZAPADA_BOOT FAT32 partition.
+ * after the managed boot flow loads the FAT32 driver payload.
  *
  * This is the Phase 3.1 D.3 gate for managed FAT32 driver loading.
  * Initialize() announces the driver, registers the FAT32 probe, and emits the

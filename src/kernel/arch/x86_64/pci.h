@@ -7,8 +7,9 @@
  * configuration space.  All raw port access is confined to this translation
  * unit; nothing above this layer may call outl/inl directly.
  *
- * Phase 3A: scans bus 0 for any VirtIO block device (vendor 0x1AF4,
- * device 0x1001 legacy or 0x1042 modern) and returns the BAR0 base.
+ * Phase 3A: scans PCI configuration space for any VirtIO block device
+ * (vendor 0x1AF4, device 0x1001 legacy or 0x1042 modern) and returns the
+ * BAR0 base.
  */
 
 #ifndef ZAPADA_ARCH_X86_64_PCI_H
@@ -21,7 +22,7 @@
 #define PCI_CFG_DATA_PORT  0x0CFCu
 
 /* VirtIO vendor / device IDs */
-#define PCI_VENDOR_VIRTIO          0x1AF4u
+#define PCI_VENDOR_VIRTIO             0x1AF4u
 #define PCI_DEVICE_VIRTIO_BLK_LEGACY  0x1001u   /* transitional (legacy) */
 #define PCI_DEVICE_VIRTIO_BLK_MODERN  0x1042u   /* non-transitional (modern) */
 
@@ -49,10 +50,19 @@ void pci_cfg_write32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t reg,
                      uint32_t value);
 
 /*
- * pci_virtio_blk_probe - Scan bus 0 for a VirtIO block device.
+ * pci_enable_device_io_memory_busmaster - Enable I/O, MMIO, and DMA access.
+ */
+void pci_enable_device_io_memory_busmaster(uint8_t bus, uint8_t dev, uint8_t fn);
+
+/*
+ * pci_dump_inventory - Print Linux-style PCI discovery lines for boot logs.
+ */
+void pci_dump_inventory(void);
+
+/*
+ * pci_virtio_blk_probe - Scan PCI configuration space for a VirtIO block device.
  *
- * Searches devices 0-31 on bus 0.  Accepts both legacy (0x1001) and modern
- * (0x1042) VirtIO block device IDs.
+ * Accepts both legacy (0x1001) and modern (0x1042) VirtIO block device IDs.
  *
  * On success sets *bar0_out to the raw BAR0 value (caller must strip the
  * type bits) and returns 0.  Returns -1 if no device is found.

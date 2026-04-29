@@ -4,7 +4,7 @@
  * Phase 3.1 D.2: GPT filesystem driver entry point.
  *
  * DllMain.Initialize() is invoked by BootLoader.cs via RuntimeCallMethod
- * after GPT.DLL is loaded from the ZAPADA_BOOT FAT32 partition.
+ * after the managed boot flow loads the GPT driver payload.
  *
  * This is the Phase 3.1 D.2 gate for managed GPT driver loading.
  * Initialize() announces the driver and emits the gate line, then returns 1.

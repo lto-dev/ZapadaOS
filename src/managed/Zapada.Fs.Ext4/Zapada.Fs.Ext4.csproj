@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Library</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<AssemblyName>Zapada.Fs.Ext4</AssemblyName>
+		<RootNamespace>Zapada.Fs.Ext4</RootNamespace>
+		<AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+		<Nullable>disable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<Optimize>true</Optimize>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="../Zapada.Fs.Ext/Zapada.Fs.Ext.csproj" />
+		<ProjectReference Include="../Zapada.Storage/Zapada.Storage.csproj" />
+	</ItemGroup>
+</Project>

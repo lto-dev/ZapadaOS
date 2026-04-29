@@ -33,6 +33,11 @@ extern virtio_dev_t g_virtio_blk_dev;
 int virtio_blk_probe_and_init(void);
 
 /*
+ * virtio_blk_dump_inventory - Print the native block-device inventory.
+ */
+void virtio_blk_dump_inventory(void);
+
+/*
  * native_read_sector - C handler for the ReadSector InternalCall.
  *
  * Managed signature:

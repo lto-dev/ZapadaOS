@@ -82,7 +82,7 @@ if ($Arch -eq "x86_64") {
     $DISK = ".\build\disk.img"
 
     $qemuArgs = @(
-        "-machine", "q35",
+        "-machine", "pc",
         "-cpu",     "qemu64",
         "-m",       $MEM_X86,
         "-cdrom",   $ISO,
@@ -91,17 +91,19 @@ if ($Arch -eq "x86_64") {
         "-serial",  "mon:stdio",
         "-vga",     "std",
         "-smp",     "2",
+        "-net",     "none",
         "-no-reboot",
         "-no-shutdown"
     )
 
-    # Attach VirtIO block disk image if present (Phase 3A Part 2+)
+    # Attach VirtIO block disk image if present (Phase 3A Part 2+).
+    # x86_64 currently uses the legacy/transitional I/O-port transport path.
     if (Test-Path $DISK) {
         $qemuArgs += "-drive"
         $qemuArgs += "file=$DISK,format=raw,if=none,id=d0"
         $qemuArgs += "-device"
-        $qemuArgs += "virtio-blk-pci,drive=d0"
-        Write-Host "  Disk image  : $DISK (VirtIO PCI modern-first, legacy fallback)" -ForegroundColor Gray
+        $qemuArgs += "virtio-blk-pci,drive=d0,disable-modern=on,disable-legacy=off,addr=0x4"
+        Write-Host "  Disk image  : $DISK (VirtIO PCI legacy/transitional)" -ForegroundColor Gray
     }
 
     if ($WaitForGdb) {

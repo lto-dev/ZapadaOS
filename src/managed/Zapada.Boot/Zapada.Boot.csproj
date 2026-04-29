@@ -25,6 +25,7 @@
     <ProjectReference Include="../Zapada.Drivers.VirtioBlock/Zapada.Drivers.VirtioBlock.csproj" />
     <ProjectReference Include="../Zapada.Fs.Gpt/Zapada.Fs.Gpt.csproj" />
     <ProjectReference Include="../Zapada.Fs.Fat32/Zapada.Fs.Fat32.csproj" />
+    <ProjectReference Include="../Zapada.Fs.Ext4/Zapada.Fs.Ext4.csproj" />
     <ProjectReference Include="../Zapada.Storage/Zapada.Storage.csproj" />
     <ProjectReference Include="../Zapada.Fs.Vfs/Zapada.Fs.Vfs.csproj" />
   </ItemGroup>

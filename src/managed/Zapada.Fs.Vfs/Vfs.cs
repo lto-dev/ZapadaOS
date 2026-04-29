@@ -58,6 +58,14 @@ public static class Vfs
         return MountTable.Mount(mountPath, volume);
     }
 
+    public static int MountRoot(MountedVolume volume)
+    {
+        if (!s_initialized)
+            return StorageStatus.NotMounted;
+
+        return MountTable.ReplaceRoot(volume);
+    }
+
     /// <summary>
     /// Open a file by absolute path. Returns a file descriptor index, or -1 on failure.
     /// </summary>

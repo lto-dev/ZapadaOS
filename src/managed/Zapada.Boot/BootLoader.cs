@@ -7,7 +7,7 @@
  * layer.  It is called by the kernel's C code via clr_execute_entry_point(),
  * which resolves the CLI Entry Point token and dispatches to Program.Main().
  *
- * Boot sequence (restructured for non-fatal persistent storage discovery):
+ * Boot sequence (Ext4-root persistent storage discovery):
  *
  *   Phase 1 — Storage abstractions
  *     S.1  Find and initialize Zapada.Storage (STORAGE.DLL).
@@ -21,13 +21,14 @@
  *     D.1  Find and initialize VBLK driver (Zapada.Drivers.VirtioBlock).
  *     D.2  Find and initialize GPT driver (Zapada.Fs.Gpt).
  *     D.3  Find and initialize FAT32 driver (Zapada.Fs.Fat32).
- *     D.4  Find and initialize VFS layer (Zapada.Fs.Vfs).
+ *     D.4  Find and initialize Ext4 driver (Zapada.Fs.Ext4).
+ *     D.5  Find and initialize VFS layer (Zapada.Fs.Vfs).
  *          Non-critical drivers: log failure but continue.
  *
- *   Phase 3 — Persistent storage discovery (NON-FATAL)
- *     Try GPT scan to find ZAPADA_BOOT partition.
- *     If found: mount FAT32 volume, call SetBootPartLba.
- *     If not found: print informational message, continue.
+ *   Phase 3 — Persistent storage discovery
+ *     Use the boot-selected GPT ZAPADA_BOOT partition as the Ext4 VFS root.
+ *     Validate root payloads directly from Ext4, including /etc/fstab.
+ *     Mount the FAT32 ZAPADA_DATA compatibility partition at /mnt/c.
  *
  *   [Gate] GateD — always emitted at the end.
  *
@@ -40,6 +41,7 @@
  *   "[Gate] GateD"                     -- Gate D complete
  */
 using System;
+using Zapada.Fs.Ext;
 using Zapada.Fs.Vfs;
 using Zapada.Storage;
 
@@ -133,7 +135,17 @@ namespace Zapada.Boot
             }
 
             /* ------------------------------------------------------------ */
-            /* Step D.4: initialize managed VFS layer.                      */
+            /* Step D.4: initialize managed Ext4 driver.                    */
+            /* ------------------------------------------------------------ */
+
+            Console.Write("[Boot] loading: Zapada.Fs.Ext4\n");
+            if (Zapada.Fs.Ext4.DllMain.Initialize() == 0)
+            {
+                Console.Write("[Boot] Ext4 Initialize failed\n");
+            }
+
+            /* ------------------------------------------------------------ */
+            /* Step D.5: initialize managed VFS layer.                      */
             /* ------------------------------------------------------------ */
 
             Console.Write("[Boot] loading: Zapada.Fs.Vfs\n");
@@ -142,87 +154,314 @@ namespace Zapada.Boot
                 Console.Write("[Boot] VFS Initialize failed\n");
             }
 
-            /* ============================================================== */
-            /* Phase 3: Persistent storage discovery (NON-FATAL)              */
-            /* ============================================================== */
-
-            Console.Write("[Boot] Persistent storage: scanning...\n");
-
-            int startLba = Gpt.FindZapadaBootPartition();
-            if (startLba < 0)
-            {
-                Console.Write("[Boot] ZAPADA_BOOT not found (non-fatal)\n");
-            }
-            else
-            {
-                Console.Write("[Boot] ZAPADA_BOOT at LBA ");
-                Console.Write(startLba);
-                Console.Write("\n");
-
-                VirtioPartitionView partition = new VirtioPartitionView();
-                partition.Initialize(startLba, 65536, 2);
-
-                VolumeProbe? bestProbe = DriverRegistry.FindBestProbe(partition);
-                if (bestProbe == null)
-                {
-                    Console.Write("[Boot] No filesystem probe matched (non-fatal)\n");
-                }
-                else
-                {
-                    Console.Write("[Boot] Probe matched: ");
-                    Console.Write(bestProbe.GetDriverKey());
-                    Console.Write("\n");
-
-                    MountedVolume? mountedVolume = bestProbe.Mount(partition);
-                    if (mountedVolume == null)
-                    {
-                        Console.Write("[Boot] Probe mount failed (non-fatal)\n");
-                    }
-                    else
-                    {
-                        int mountRc = Vfs.Mount("/boot", mountedVolume);
-                        if (mountRc < 0)
-                        {
-                            Console.Write("[Boot] VFS mount /boot failed\n");
-                        }
-                        else
-                        {
-                            Console.Write("[Boot] FAT32 mounted at /boot\n");
-
-                            int listRc = Vfs.List("/boot");
-                            if (listRc < 0)
-                            {
-                                Console.Write("[Boot] FAT32 VFS list failed\n");
-                            }
-
-                            int fd = Vfs.Open("/boot/TEST.DLL");
-                            if (fd >= 0)
-                            {
-                                byte[] hdr = new byte[2];
-                                int nr = Vfs.Read(fd, hdr, 0, 2);
-                                Vfs.Close(fd);
-
-                                if (nr == 2 && hdr[0] == 0x4D && hdr[1] == 0x5A)
-                                {
-                                    Console.Write("[Boot] FAT32 VFS read OK: MZ verified\n");
-                                    Console.Write("[Gate] Phase-Fat32Driver\n");
-                                }
-                                else
-                                {
-                                    Console.Write("[Boot] FAT32 VFS read: MZ mismatch\n");
-                                }
-                            }
-                            else
-                            {
-                                Console.Write("[Boot] FAT32 VFS open failed\n");
-                            }
-                        }
-                    }
-                }
-            }
+            MountPersistentRootAndCompatibilityVolume();
 
             /* Gate D: boot sequence complete. */
             Console.Write("[Gate] GateD\n");
+        }
+
+        private static void MountPersistentRootAndCompatibilityVolume()
+        {
+            Console.Write("[Boot] Persistent storage: scanning...\n");
+
+            GptPartitionInfo rootInfo = Gpt.FindPartitionInfoByName("ZAPADA_BOOT");
+            if (rootInfo == null)
+            {
+                Console.Write("[Boot] ZAPADA_BOOT not found (non-fatal)\n");
+                return;
+            }
+
+            Console.Write("[Boot] ZAPADA_BOOT at LBA ");
+            Console.Write((int)rootInfo.StartLba);
+            Console.Write("\n");
+
+            VirtioPartitionView rootPartition = new VirtioPartitionView();
+            rootPartition.Initialize(rootInfo.StartLba, rootInfo.SectorCount, 2);
+
+            VolumeProbe rootProbe = DriverRegistry.FindBestProbe(rootPartition);
+            if (rootProbe == null)
+            {
+                Console.Write("[Boot] Ext4 probe not matched (non-fatal)\n");
+                return;
+            }
+
+            Console.Write("[Boot] Root probe matched: ");
+            Console.Write(rootProbe.GetDriverKey());
+            Console.Write("\n");
+
+            MountedVolume rootVolume = rootProbe.Mount(rootPartition);
+            if (rootVolume == null)
+            {
+                Console.Write("[Boot] Ext4 root mount failed (non-fatal)\n");
+                return;
+            }
+
+            int rootMountRc = Vfs.MountRoot(rootVolume);
+            if (rootMountRc < 0)
+            {
+                Console.Write("[Boot] VFS mount / failed for Ext4\n");
+                return;
+            }
+
+            Console.Write("[Boot] Ext4 mounted as root /\n");
+            Console.Write("[Gate] Phase-Ext4Root\n");
+
+            VerifyExt4RootPayloads();
+            MountConfiguredFstabVolumes();
+        }
+
+        private static void VerifyExt4RootPayloads()
+        {
+            if (VerifyMZFile("/Zapada.Boot.dll"))
+                Console.Write("[Gate] Phase-Ext4Read\n");
+            else
+                Console.Write("[Boot] Ext4 root payload MZ verification failed\n");
+
+            if (VerifyTextStartsWith("/etc/fstab", '#'))
+                Console.Write("[Gate] Phase-Ext4Fstab\n");
+            else
+                Console.Write("[Boot] Ext4 /etc/fstab read failed\n");
+        }
+
+        private static bool VerifyMZFile(string path)
+        {
+            int fd = Vfs.Open(path);
+            if (fd < 0)
+                return false;
+
+            byte[] hdr = new byte[2];
+            int nr = Vfs.Read(fd, hdr, 0, 2);
+            Vfs.Close(fd);
+            return nr == 2 && hdr[0] == 0x4D && hdr[1] == 0x5A;
+        }
+
+        private static bool VerifyTextStartsWith(string path, char expected)
+        {
+            int fd = Vfs.Open(path);
+            if (fd < 0)
+                return false;
+
+            byte[] hdr = new byte[1];
+            int nr = Vfs.Read(fd, hdr, 0, 1);
+            Vfs.Close(fd);
+            return nr == 1 && hdr[0] == expected;
+        }
+
+        private static void MountConfiguredFstabVolumes()
+        {
+            Console.Write("[Boot] reading: /etc/fstab\n");
+
+            int fd = Vfs.Open("/etc/fstab");
+            if (fd < 0)
+            {
+                Console.Write("[Boot] /etc/fstab open failed\n");
+                return;
+            }
+
+            byte[] fstab = new byte[512];
+            int bytesRead = Vfs.Read(fd, fstab, 0, fstab.Length);
+            Vfs.Close(fd);
+            if (bytesRead <= 0)
+            {
+                Console.Write("[Boot] /etc/fstab read failed\n");
+                return;
+            }
+
+            int pos = 0;
+            while (pos < bytesRead)
+            {
+                int lineStart = pos;
+                while (pos < bytesRead && fstab[pos] != 10 && fstab[pos] != 13)
+                    pos++;
+
+                int lineEnd = pos;
+                while (pos < bytesRead && (fstab[pos] == 10 || fstab[pos] == 13))
+                    pos++;
+
+                ProcessFstabLine(fstab, lineStart, lineEnd);
+            }
+        }
+
+        private static void ProcessFstabLine(byte[] buffer, int start, int end)
+        {
+            int pos = SkipSpaces(buffer, start, end);
+            if (pos >= end)
+                return;
+            if (buffer[pos] == '#')
+                return;
+
+            int specStart = pos;
+            pos = SkipField(buffer, pos, end);
+            int specLength = pos - specStart;
+
+            pos = SkipSpaces(buffer, pos, end);
+            int mountStart = pos;
+            pos = SkipField(buffer, pos, end);
+            int mountLength = pos - mountStart;
+
+            pos = SkipSpaces(buffer, pos, end);
+            int typeStart = pos;
+            pos = SkipField(buffer, pos, end);
+            int typeLength = pos - typeStart;
+
+            if (specLength <= 0 || mountLength <= 0 || typeLength <= 0)
+                return;
+
+            if (FieldEquals(buffer, mountStart, mountLength, "/"))
+                return;
+
+            if (!FieldStartsWith(buffer, specStart, specLength, "LABEL="))
+                return;
+
+            string label = ReadAsciiField(buffer, specStart + 6, specLength - 6);
+            string mountPath = ReadAsciiField(buffer, mountStart, mountLength);
+            string fsType = ReadAsciiField(buffer, typeStart, typeLength);
+            MountFstabVolume(label, mountPath, fsType);
+        }
+
+        private static int SkipSpaces(byte[] buffer, int pos, int end)
+        {
+            while (pos < end && (buffer[pos] == 32 || buffer[pos] == 9))
+                pos++;
+
+            return pos;
+        }
+
+        private static int SkipField(byte[] buffer, int pos, int end)
+        {
+            while (pos < end && buffer[pos] != 32 && buffer[pos] != 9)
+                pos++;
+
+            return pos;
+        }
+
+        private static bool FieldEquals(byte[] buffer, int start, int length, string value)
+        {
+            if (value == null || length != value.Length)
+                return false;
+
+            int i = 0;
+            while (i < length)
+            {
+                if (buffer[start + i] != value[i])
+                    return false;
+
+                i++;
+            }
+
+            return true;
+        }
+
+        private static bool FieldStartsWith(byte[] buffer, int start, int length, string value)
+        {
+            if (value == null || length < value.Length)
+                return false;
+
+            int i = 0;
+            while (i < value.Length)
+            {
+                if (buffer[start + i] != value[i])
+                    return false;
+
+                i++;
+            }
+
+            return true;
+        }
+
+        private static string ReadAsciiField(byte[] buffer, int start, int length)
+        {
+            string value = "";
+            int i = 0;
+            while (i < length)
+            {
+                value = string.Concat(value, ExtText.ByteToString(buffer[start + i] & 0xFF));
+                i++;
+            }
+
+            return value;
+        }
+
+        private static void MountFstabVolume(string label, string mountPath, string fsType)
+        {
+            Console.Write("[Boot] fstab mount ");
+            Console.Write(label);
+            Console.Write(" -> ");
+            Console.Write(mountPath);
+            Console.Write(" type=");
+            Console.Write(fsType);
+            Console.Write("\n");
+
+            GptPartitionInfo info = Gpt.FindPartitionInfoByName(label);
+            if (info == null)
+            {
+                Console.Write("[Boot] fstab partition not found\n");
+                return;
+            }
+
+            VirtioPartitionView fstabPartition = new VirtioPartitionView();
+            fstabPartition.Initialize(info.StartLba, info.SectorCount, 2);
+
+            string driverKey = MapFstabTypeToDriverKey(fsType);
+            MountedVolume fstabVolume = MountKnownFstabVolume(fstabPartition, driverKey);
+            if (fstabVolume == null)
+            {
+                Console.Write("[Boot] fstab mount failed during probe mount\n");
+                return;
+            }
+
+            Console.Write("[Boot] Compatibility probe matched: ");
+            Console.Write(driverKey);
+            Console.Write("\n");
+
+            int mountRc = Vfs.Mount(mountPath, fstabVolume);
+            if (mountRc < 0)
+            {
+                Console.Write("[Boot] VFS fstab mount failed\n");
+                return;
+            }
+
+            Console.Write("[Boot] fstab mounted: ");
+            Console.Write(mountPath);
+            Console.Write("\n");
+
+            int listRc = Vfs.List(mountPath);
+            if (listRc < 0)
+                Console.Write("[Boot] fstab VFS list failed\n");
+
+            if (mountPath == "/mnt/c" && VerifyMZFile("/mnt/c/TEST.DLL"))
+            {
+                Console.Write("[Boot] FAT32 VFS read OK: MZ verified\n");
+                Console.Write("[Gate] Phase-Fat32Driver\n");
+                Console.Write("[Gate] Phase-Fat32MntC\n");
+            }
+            else
+            {
+                Console.Write("[Boot] FAT32 VFS read failed on /mnt/c/TEST.DLL\n");
+            }
+        }
+
+        private static string MapFstabTypeToDriverKey(string fsType)
+        {
+            if (fsType == "vfat" || fsType == "fat" || fsType == "fat32")
+                return "fat32";
+
+            if (fsType == "ext4" || fsType == "ext3" || fsType == "ext2")
+                return "ext4";
+
+            return fsType;
+        }
+
+        private static MountedVolume MountKnownFstabVolume(PartitionView partition, string driverKey)
+        {
+            if (driverKey == "fat32")
+                return Zapada.Fs.Fat32.Fat32Driver.Mount(partition);
+
+            VolumeProbe probe = DriverRegistry.FindBestProbe(partition);
+            if (probe == null || probe.GetDriverKey() != driverKey)
+                return null;
+
+            return probe.Mount(partition);
         }
     }
 }

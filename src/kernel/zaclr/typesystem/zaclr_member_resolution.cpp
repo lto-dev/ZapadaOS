@@ -29,7 +29,300 @@ namespace
             && left->type_token.raw == right->type_token.raw;
     }
 
-    static bool method_signatures_match_for_resolution(const struct zaclr_signature_desc* candidate_signature,
+    static struct zaclr_result decode_compressed_uint(const uint8_t* data,
+                                                      size_t size,
+                                                      uint32_t* offset,
+                                                      uint32_t* value)
+    {
+        uint8_t first;
+
+        if (data == NULL || offset == NULL || value == NULL || *offset >= size)
+        {
+            return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
+        }
+
+        first = data[*offset];
+        if ((first & 0x80u) == 0u)
+        {
+            *value = first;
+            *offset += 1u;
+            return zaclr_result_ok();
+        }
+
+        if ((first & 0xC0u) == 0x80u)
+        {
+            if ((*offset + 1u) >= size)
+            {
+                return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
+            }
+
+            *value = (((uint32_t)(first & 0x3Fu)) << 8) | (uint32_t)data[*offset + 1u];
+            *offset += 2u;
+            return zaclr_result_ok();
+        }
+
+        if ((first & 0xE0u) == 0xC0u)
+        {
+            if ((*offset + 3u) >= size)
+            {
+                return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
+            }
+
+            *value = (((uint32_t)(first & 0x1Fu)) << 24)
+                | ((uint32_t)data[*offset + 1u] << 16)
+                | ((uint32_t)data[*offset + 2u] << 8)
+                | (uint32_t)data[*offset + 3u];
+            *offset += 4u;
+            return zaclr_result_ok();
+        }
+
+        return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
+    }
+
+    static struct zaclr_token decode_type_def_or_ref_token(uint32_t encoded)
+    {
+        uint32_t tag = encoded & 0x3u;
+        uint32_t row = encoded >> 2u;
+        uint32_t table = tag == 0u
+            ? ZACLR_TOKEN_TABLE_TYPEDEF
+            : (tag == 1u ? ZACLR_TOKEN_TABLE_TYPEREF : ZACLR_TOKEN_TABLE_TYPESPEC);
+        return zaclr_token_make((table << 24) | row);
+    }
+
+    static bool signature_type_tokens_equal_by_identity(const struct zaclr_loaded_assembly* left_assembly,
+                                                        uint8_t left_element,
+                                                        uint32_t left_encoded,
+                                                        const struct zaclr_loaded_assembly* right_assembly,
+                                                        uint8_t right_element,
+                                                        uint32_t right_encoded)
+    {
+        struct zaclr_member_name_ref left_name = {};
+        struct zaclr_member_name_ref right_name = {};
+        struct zaclr_token left_token;
+        struct zaclr_token right_token;
+
+        if (left_element != right_element || left_assembly == NULL || right_assembly == NULL)
+        {
+            return false;
+        }
+
+        left_token = decode_type_def_or_ref_token(left_encoded);
+        right_token = decode_type_def_or_ref_token(right_encoded);
+        if (zaclr_metadata_get_type_name(left_assembly, left_token, &left_name).status != ZACLR_STATUS_OK
+            || zaclr_metadata_get_type_name(right_assembly, right_token, &right_name).status != ZACLR_STATUS_OK)
+        {
+            return false;
+        }
+
+        return zaclr_text_equals(left_name.type_namespace, right_name.type_namespace)
+            && zaclr_text_equals(left_name.type_name, right_name.type_name);
+    }
+
+    static bool signature_blob_type_equals(const struct zaclr_loaded_assembly* left_assembly,
+                                           const uint8_t* left_data,
+                                           size_t left_size,
+                                           uint32_t* left_offset,
+                                           const struct zaclr_loaded_assembly* right_assembly,
+                                           const uint8_t* right_data,
+                                           size_t right_size,
+                                           uint32_t* right_offset)
+    {
+        uint8_t left_element;
+        uint8_t right_element;
+
+        if (left_data == NULL || right_data == NULL || left_offset == NULL || right_offset == NULL
+            || *left_offset >= left_size || *right_offset >= right_size)
+        {
+            return false;
+        }
+
+        left_element = left_data[*left_offset];
+        right_element = right_data[*right_offset];
+        *left_offset += 1u;
+        *right_offset += 1u;
+
+        while (left_element == ZACLR_ELEMENT_TYPE_BYREF || left_element == ZACLR_ELEMENT_TYPE_PINNED)
+        {
+            if (*left_offset >= left_size)
+            {
+                return false;
+            }
+            left_element = left_data[*left_offset];
+            *left_offset += 1u;
+        }
+
+        while (right_element == ZACLR_ELEMENT_TYPE_BYREF || right_element == ZACLR_ELEMENT_TYPE_PINNED)
+        {
+            if (*right_offset >= right_size)
+            {
+                return false;
+            }
+            right_element = right_data[*right_offset];
+            *right_offset += 1u;
+        }
+
+        if (left_element != right_element)
+        {
+            return false;
+        }
+
+        switch (left_element)
+        {
+            case ZACLR_ELEMENT_TYPE_CLASS:
+            case ZACLR_ELEMENT_TYPE_VALUETYPE:
+            {
+                uint32_t left_value;
+                uint32_t right_value;
+                if (decode_compressed_uint(left_data, left_size, left_offset, &left_value).status != ZACLR_STATUS_OK
+                    || decode_compressed_uint(right_data, right_size, right_offset, &right_value).status != ZACLR_STATUS_OK)
+                {
+                    return false;
+                }
+
+                return left_value == right_value
+                    || signature_type_tokens_equal_by_identity(left_assembly,
+                                                               left_element,
+                                                               left_value,
+                                                               right_assembly,
+                                                               right_element,
+                                                               right_value);
+            }
+
+            case ZACLR_ELEMENT_TYPE_VAR:
+            case ZACLR_ELEMENT_TYPE_MVAR:
+            {
+                uint32_t left_value;
+                uint32_t right_value;
+                return decode_compressed_uint(left_data, left_size, left_offset, &left_value).status == ZACLR_STATUS_OK
+                    && decode_compressed_uint(right_data, right_size, right_offset, &right_value).status == ZACLR_STATUS_OK
+                    && left_value == right_value;
+            }
+
+            case ZACLR_ELEMENT_TYPE_PTR:
+            case ZACLR_ELEMENT_TYPE_SZARRAY:
+                return signature_blob_type_equals(left_assembly, left_data, left_size, left_offset,
+                                                  right_assembly, right_data, right_size, right_offset);
+
+            case ZACLR_ELEMENT_TYPE_GENERICINST:
+            {
+                uint32_t left_count;
+                uint32_t right_count;
+                uint32_t index;
+                if (!signature_blob_type_equals(left_assembly, left_data, left_size, left_offset,
+                                                right_assembly, right_data, right_size, right_offset)
+                    || decode_compressed_uint(left_data, left_size, left_offset, &left_count).status != ZACLR_STATUS_OK
+                    || decode_compressed_uint(right_data, right_size, right_offset, &right_count).status != ZACLR_STATUS_OK
+                    || left_count != right_count)
+                {
+                    return false;
+                }
+
+                for (index = 0u; index < left_count; ++index)
+                {
+                    if (!signature_blob_type_equals(left_assembly, left_data, left_size, left_offset,
+                                                    right_assembly, right_data, right_size, right_offset))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            case ZACLR_ELEMENT_TYPE_ARRAY:
+            {
+                uint32_t left_rank;
+                uint32_t right_rank;
+                uint32_t left_count;
+                uint32_t right_count;
+                uint32_t left_value;
+                uint32_t right_value;
+                uint32_t index;
+                if (!signature_blob_type_equals(left_assembly, left_data, left_size, left_offset,
+                                                right_assembly, right_data, right_size, right_offset)
+                    || decode_compressed_uint(left_data, left_size, left_offset, &left_rank).status != ZACLR_STATUS_OK
+                    || decode_compressed_uint(right_data, right_size, right_offset, &right_rank).status != ZACLR_STATUS_OK
+                    || left_rank != right_rank
+                    || decode_compressed_uint(left_data, left_size, left_offset, &left_count).status != ZACLR_STATUS_OK
+                    || decode_compressed_uint(right_data, right_size, right_offset, &right_count).status != ZACLR_STATUS_OK
+                    || left_count != right_count)
+                {
+                    return false;
+                }
+
+                for (index = 0u; index < left_count; ++index)
+                {
+                    if (decode_compressed_uint(left_data, left_size, left_offset, &left_value).status != ZACLR_STATUS_OK
+                        || decode_compressed_uint(right_data, right_size, right_offset, &right_value).status != ZACLR_STATUS_OK
+                        || left_value != right_value)
+                    {
+                        return false;
+                    }
+                }
+
+                if (decode_compressed_uint(left_data, left_size, left_offset, &left_count).status != ZACLR_STATUS_OK
+                    || decode_compressed_uint(right_data, right_size, right_offset, &right_count).status != ZACLR_STATUS_OK
+                    || left_count != right_count)
+                {
+                    return false;
+                }
+
+                for (index = 0u; index < left_count; ++index)
+                {
+                    if (decode_compressed_uint(left_data, left_size, left_offset, &left_value).status != ZACLR_STATUS_OK
+                        || decode_compressed_uint(right_data, right_size, right_offset, &right_value).status != ZACLR_STATUS_OK
+                        || left_value != right_value)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            default:
+                return true;
+        }
+    }
+
+    static bool method_parameter_blobs_match(const struct zaclr_loaded_assembly* candidate_assembly,
+                                             const struct zaclr_signature_desc* candidate_signature,
+                                             const struct zaclr_loaded_assembly* memberref_assembly,
+                                             const struct zaclr_signature_desc* memberref_signature)
+    {
+        uint32_t candidate_offset;
+        uint32_t memberref_offset;
+        uint32_t index;
+
+        if (candidate_signature == NULL || memberref_signature == NULL
+            || candidate_signature->blob.data == NULL || memberref_signature->blob.data == NULL)
+        {
+            return false;
+        }
+
+        candidate_offset = candidate_signature->parameter_types_offset;
+        memberref_offset = memberref_signature->parameter_types_offset;
+        for (index = 0u; index < candidate_signature->parameter_count; ++index)
+        {
+            if (!signature_blob_type_equals(candidate_assembly,
+                                            candidate_signature->blob.data,
+                                            candidate_signature->blob.size,
+                                            &candidate_offset,
+                                            memberref_assembly,
+                                            memberref_signature->blob.data,
+                                            memberref_signature->blob.size,
+                                            &memberref_offset))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static bool method_signatures_match_for_resolution(const struct zaclr_loaded_assembly* candidate_assembly,
+                                                       const struct zaclr_signature_desc* candidate_signature,
+                                                       const struct zaclr_loaded_assembly* memberref_assembly,
                                                        const struct zaclr_signature_desc* memberref_signature)
     {
         uint32_t parameter_index;
@@ -49,6 +342,11 @@ namespace
             || candidate_signature->generic_parameter_count != memberref_signature->generic_parameter_count)
         {
             return false;
+        }
+
+        if (method_parameter_blobs_match(candidate_assembly, candidate_signature, memberref_assembly, memberref_signature))
+        {
+            return true;
         }
 
         for (parameter_index = 0u; parameter_index < candidate_signature->parameter_count; ++parameter_index)
@@ -192,56 +490,6 @@ namespace
              | ((uint32_t)data[1] << 8)
              | ((uint32_t)data[2] << 16)
              | ((uint32_t)data[3] << 24);
-    }
-
-    static struct zaclr_result decode_compressed_uint(const uint8_t* data,
-                                                      size_t size,
-                                                      uint32_t* offset,
-                                                      uint32_t* value)
-    {
-        uint8_t first;
-
-        if (data == NULL || offset == NULL || value == NULL || *offset >= size)
-        {
-            return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
-        }
-
-        first = data[*offset];
-        if ((first & 0x80u) == 0u)
-        {
-            *value = first;
-            *offset += 1u;
-            return zaclr_result_ok();
-        }
-
-        if ((first & 0xC0u) == 0x80u)
-        {
-            if ((*offset + 1u) >= size)
-            {
-                return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
-            }
-
-            *value = (((uint32_t)(first & 0x3Fu)) << 8) | (uint32_t)data[*offset + 1u];
-            *offset += 2u;
-            return zaclr_result_ok();
-        }
-
-        if ((first & 0xE0u) == 0xC0u)
-        {
-            if ((*offset + 3u) >= size)
-            {
-                return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
-            }
-
-            *value = (((uint32_t)(first & 0x1Fu)) << 24)
-                   | ((uint32_t)data[*offset + 1u] << 16)
-                   | ((uint32_t)data[*offset + 2u] << 8)
-                   | (uint32_t)data[*offset + 3u];
-            *offset += 4u;
-            return zaclr_result_ok();
-        }
-
-        return zaclr_result_make(ZACLR_STATUS_BAD_METADATA, ZACLR_STATUS_CATEGORY_METADATA);
     }
 
     static struct zaclr_result populate_typespec_owner_info(const struct zaclr_loaded_assembly* assembly,
@@ -615,15 +863,17 @@ extern "C" struct zaclr_result zaclr_member_resolution_resolve_method(const stru
             continue;
         }
 
-        if (!zaclr_managed_signatures_equal(*out_assembly,
-                                            &candidate->signature,
-                                            source_assembly,
-                                            &memberref->signature)
-            && !method_signatures_match_for_resolution(&candidate->signature,
-                                                       &memberref->signature))
-        {
-            ZACLR_TRACE_VALUE((struct zaclr_runtime*)runtime,
-                              ZACLR_TRACE_CATEGORY_INTEROP,
+            if (!zaclr_managed_signatures_equal(*out_assembly,
+                                                &candidate->signature,
+                                                source_assembly,
+                                                &memberref->signature)
+                && !method_signatures_match_for_resolution(*out_assembly,
+                                                           &candidate->signature,
+                                                           source_assembly,
+                                                           &memberref->signature))
+            {
+                ZACLR_TRACE_VALUE((struct zaclr_runtime*)runtime,
+                                  ZACLR_TRACE_CATEGORY_INTEROP,
                               ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,
                               "MemberRef.SignatureSkip",
                               (uint64_t)candidate->token.raw);
@@ -641,7 +891,6 @@ extern "C" struct zaclr_result zaclr_member_resolution_resolve_method(const stru
 
     if (*out_method == NULL)
     {
-        /* console_write("[ZACLR][resolve] no matching method\n"); */
         ZACLR_TRACE_VALUE((struct zaclr_runtime*)runtime,
                           ZACLR_TRACE_CATEGORY_INTEROP,
                           ZACLR_TRACE_EVENT_INTERNAL_CALL_BIND,

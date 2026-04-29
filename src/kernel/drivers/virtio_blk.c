@@ -28,6 +28,7 @@
 #include <kernel/drivers/virtio.h>
 #include <kernel/drivers/block.h>
 #include <kernel/types.h>
+#include <kernel/serial.h>
 
 #define CLR_ARR_HDR_SIZE 24u
 
@@ -62,6 +63,30 @@
 virtio_dev_t  g_virtio_blk_dev;   /* Zero-initialised in BSS until probe */
 block_device_t g_block_vda;       /* Zero-initialised in BSS until probe */
 
+void virtio_blk_dump_inventory(void)
+{
+    serial_write("Block inventory  : ");
+    if (g_block_vda.present == 0) {
+        serial_write("no disks\n");
+        return;
+    }
+
+    serial_write(g_block_vda.name);
+    serial_write(" sectors=");
+    serial_write_dec(g_block_vda.sector_count);
+    serial_write(" sector_size=");
+    serial_write_dec((uint64_t)g_block_vda.sector_size);
+    serial_write(" transport=");
+    if (g_virtio_blk_dev.is_legacy != 0) {
+        serial_write("virtio-pci-legacy");
+    } else if (g_virtio_blk_dev.is_modern_pci != 0) {
+        serial_write("virtio-pci-modern");
+    } else {
+        serial_write("virtio-mmio");
+    }
+    serial_write("\n");
+}
+
 /* --------------------------------------------------------------------------
  * virtio_blk_probe_and_init
  * -------------------------------------------------------------------------- */
@@ -87,9 +112,11 @@ int virtio_blk_probe_and_init(void)
                                     &notify_mult) == 0) {
         if (virtio_blk_init_pci_modern(common_cfg, notify_cfg, device_cfg,
                                        notify_mult, &g_virtio_blk_dev) != 0) {
+            serial_write("VirtIO block     : modern PCI init failed\n");
             return -1;
         }
 
+        serial_write("VirtIO block     : modern PCI initialized\n");
         cap_lo = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_dev.device_cfg_base + 0u);
         cap_hi = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_dev.device_cfg_base + 4u);
         g_block_vda.sector_count = ((uint64_t)cap_hi << 32) | (uint64_t)cap_lo;
@@ -101,17 +128,21 @@ int virtio_blk_probe_and_init(void)
      */
     ret = pci_virtio_blk_probe(&bar0);
     if (ret != 0) {
+        serial_write("VirtIO block     : PCI device not found\n");
         return -1;   /* no VirtIO block device on bus 0 */
     }
 
+    serial_write("VirtIO block     : legacy probe matched\n");
     if ((bar0 & 1u) == 1u) {
         /* I/O space BAR — legacy VirtIO PCI */
         uint16_t io_base = (uint16_t)(bar0 & 0xFFFCu);
 
         if (virtio_blk_init_legacy(io_base, &g_virtio_blk_dev) != 0) {
+                serial_write("VirtIO block     : legacy init failed\n");
                 return -1;
             }
     
+            serial_write("VirtIO block     : legacy initialized\n");
             /*
              * Read device capacity from VirtIO block device config space.
              * In legacy VirtIO PCI, the device-specific config starts at I/O port
@@ -179,6 +210,8 @@ int virtio_blk_probe_and_init(void)
     g_block_vda.present     = 1;
     g_virtio_blk_dev.initialized = 1;
 
+    virtio_blk_dump_inventory();
+
     return 0;
 }
 
@@ -196,9 +229,11 @@ int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj)
     int      rc;
 
     if (arr_obj == (void *)0 || count <= 0) {
+        serial_write("VirtIO block     : read invalid args\n");
         return -1;
     }
     if (g_virtio_blk_dev.initialized == 0) {
+        serial_write("VirtIO block     : read before init\n");
         return -1;
     }
 
@@ -207,6 +242,9 @@ int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj)
 
     rc = virtio_blk_read(&g_virtio_blk_dev, (uint64_t)lba,
                          (uint32_t)count, data_ptr);
+    if (rc != 0) {
+        serial_write("VirtIO block     : read failed\n");
+    }
     return (int32_t)rc;
 }
 

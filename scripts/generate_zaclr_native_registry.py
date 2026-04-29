@@ -13,11 +13,16 @@ def decode_wrapper_type_name(wrapper_name: str):
 def parse_named_type(text: str, index: int):
     end = index
     while end < len(text) and (text[end].isalnum() or text[end] == '_'):
+        if text.startswith('__', end) and end + 2 < len(text) and text[end + 2].isdigit():
+            break
         end += 1
     decoded = text[index:end].replace('__', '\0').replace('_', '.').replace('\0', '_')
     split = decoded.rfind('.')
     namespace = '' if split < 0 else decoded[:split]
     name = decoded if split < 0 else decoded[split + 1:]
+    arity_match = re.search(r'G(\d+)$', name)
+    if arity_match:
+        name = name[:arity_match.start()] + '`' + arity_match.group(1)
     return namespace, name, end
 
 
@@ -98,6 +103,38 @@ def parse_sig_type(text: str, primitive_map: dict[str, str], index: int = 0):
             return ({'kind': key, 'flags': flags}, index + len(key))
 
     raise RuntimeError(f'unsupported signature vocabulary: {text[index:]}')
+
+
+def split_signature_suffix(signature_suffix: str):
+    raw_parts = signature_suffix.split('__')
+
+    def consume_part(index: int):
+        if index >= len(raw_parts):
+            raise RuntimeError(f'malformed wrapper declaration parse: {signature_suffix}')
+
+        part = raw_parts[index]
+        if not part.startswith('GENERICINST_'):
+            return part, index + 1
+
+        if index + 1 >= len(raw_parts) or not raw_parts[index + 1].isdigit():
+            raise RuntimeError(f'malformed wrapper declaration parse: {part}')
+
+        argument_count = int(raw_parts[index + 1])
+        current = part + '__' + raw_parts[index + 1]
+        next_index = index + 2
+        for _ in range(argument_count):
+            argument, next_index = consume_part(next_index)
+            current += '__' + argument
+
+        return current, next_index
+
+    parts: list[str] = []
+    index = 0
+    while index < len(raw_parts):
+        part, index = consume_part(index)
+        parts.append(part)
+
+    return parts
 
 
 def emit_sig_type(spec: dict, name_hint: str, primitive_map: dict[str, str]):
@@ -204,7 +241,7 @@ def main() -> int:
                 raise RuntimeError(f'duplicate exact bind entries in one assembly: {key}')
             seen.add(key)
 
-            signature_parts = signature_suffix.split('__')
+            signature_parts = split_signature_suffix(signature_suffix)
             has_this = 1
             if signature_parts and signature_parts[0] == 'STATIC':
                 has_this = 0

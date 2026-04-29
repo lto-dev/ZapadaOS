@@ -7652,11 +7652,16 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         }
 
         case CEE_STIND_I1:
+        case CEE_STIND_I2:
+        case CEE_STIND_I4:
+        case CEE_STIND_I8:
+        case CEE_STIND_I:
         {
             struct zaclr_stack_value value = {};
             struct zaclr_stack_value address = {};
             struct zaclr_resolved_byref target = {};
-            int32_t value_i4;
+            int32_t value_i4 = 0;
+            int64_t value_i8 = 0;
             struct zaclr_result result = zaclr_eval_stack_pop(&frame->eval_stack, &value);
             if (result.status != ZACLR_STATUS_OK)
             {
@@ -7675,7 +7680,26 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
-            result = stack_value_to_i32(&value, &value_i4);
+            switch (opcode)
+            {
+                case CEE_STIND_I1:
+                case CEE_STIND_I2:
+                case CEE_STIND_I4:
+                    result = stack_value_to_i32(&value, &value_i4);
+                    break;
+                case CEE_STIND_I8:
+                    result = stack_value_to_i64(&value, &value_i8);
+                    break;
+                case CEE_STIND_I:
+#if defined(ARCH_X86_64) || defined(__x86_64__) || defined(__aarch64__)
+                    result = stack_value_to_i64(&value, &value_i8);
+#else
+                    result = stack_value_to_i32(&value, &value_i4);
+#endif
+                    break;
+                default:
+                    return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+            }
             if (result.status != ZACLR_STATUS_OK)
             {
                 return result;
@@ -7684,16 +7708,81 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             frame->il_offset += 1u;
             if (target.stack_slot != NULL)
             {
-                target.stack_slot->kind = ZACLR_STACK_VALUE_I4;
-                target.stack_slot->data.i4 = (int32_t)(int8_t)value_i4;
-                return zaclr_result_ok();
+                switch (opcode)
+                {
+                    case CEE_STIND_I1:
+                        target.stack_slot->kind = ZACLR_STACK_VALUE_I4;
+                        target.stack_slot->data.i4 = (int32_t)(int8_t)value_i4;
+                        return zaclr_result_ok();
+                    case CEE_STIND_I2:
+                        target.stack_slot->kind = ZACLR_STACK_VALUE_I4;
+                        target.stack_slot->data.i4 = (int32_t)(int16_t)value_i4;
+                        return zaclr_result_ok();
+                    case CEE_STIND_I4:
+                        target.stack_slot->kind = ZACLR_STACK_VALUE_I4;
+                        target.stack_slot->data.i4 = value_i4;
+                        return zaclr_result_ok();
+                    case CEE_STIND_I8:
+                        target.stack_slot->kind = ZACLR_STACK_VALUE_I8;
+                        target.stack_slot->data.i8 = value_i8;
+                        return zaclr_result_ok();
+                    case CEE_STIND_I:
+#if defined(ARCH_X86_64) || defined(__x86_64__) || defined(__aarch64__)
+                        target.stack_slot->kind = ZACLR_STACK_VALUE_I8;
+                        target.stack_slot->data.i8 = value_i8;
+#else
+                        target.stack_slot->kind = ZACLR_STACK_VALUE_I4;
+                        target.stack_slot->data.i4 = value_i4;
+#endif
+                        return zaclr_result_ok();
+                    default:
+                        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+                }
             }
 
             if (target.address != NULL)
             {
-                uint8_t raw = (uint8_t)value_i4;
-                kernel_memcpy(target.address, &raw, sizeof(raw));
-                return zaclr_result_ok();
+                switch (opcode)
+                {
+                    case CEE_STIND_I1:
+                    {
+                        uint8_t raw = (uint8_t)value_i4;
+                        kernel_memcpy(target.address, &raw, sizeof(raw));
+                        return zaclr_result_ok();
+                    }
+                    case CEE_STIND_I2:
+                    {
+                        uint16_t raw = (uint16_t)value_i4;
+                        kernel_memcpy(target.address, &raw, sizeof(raw));
+                        return zaclr_result_ok();
+                    }
+                    case CEE_STIND_I4:
+                    {
+                        uint32_t raw = (uint32_t)value_i4;
+                        kernel_memcpy(target.address, &raw, sizeof(raw));
+                        return zaclr_result_ok();
+                    }
+                    case CEE_STIND_I8:
+                    {
+                        uint64_t raw = (uint64_t)value_i8;
+                        kernel_memcpy(target.address, &raw, sizeof(raw));
+                        return zaclr_result_ok();
+                    }
+                    case CEE_STIND_I:
+                    {
+                        uintptr_t raw = (uintptr_t)(
+#if defined(ARCH_X86_64) || defined(__x86_64__) || defined(__aarch64__)
+                            value_i8
+#else
+                            value_i4
+#endif
+                        );
+                        kernel_memcpy(target.address, &raw, sizeof(raw));
+                        return zaclr_result_ok();
+                    }
+                    default:
+                        return zaclr_result_make(ZACLR_STATUS_NOT_IMPLEMENTED, ZACLR_STATUS_CATEGORY_EXEC);
+                }
             }
 
             return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
@@ -8658,7 +8747,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 
         case CEE_LDELEMA:
         {
-            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 2u));
+            struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
             struct zaclr_stack_value index_value = {};
             struct zaclr_stack_value array_value = {};
             struct zaclr_array_desc* array;
@@ -8694,7 +8783,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
             }
 
-            frame->il_offset += 6u;
+            frame->il_offset += 5u;
             {
                 struct zaclr_stack_value address_value = {};
                 uint8_t* address = (uint8_t*)zaclr_array_data(array) + ((size_t)index * zaclr_array_element_size(array));

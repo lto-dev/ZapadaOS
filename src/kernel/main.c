@@ -35,6 +35,7 @@
 #include <boot/multiboot2.h>
 #include <kernel/arch/x86_64/gdt.h>
 #include <kernel/arch/x86_64/idt.h>
+#include <kernel/arch/x86_64/pci.h>
 #include <kernel/drivers/virtio_blk.h>
 #include <kernel/fb_console.h>
 #include <kernel/gates/phase_gates.h>
@@ -355,7 +356,9 @@ void kernel_main(uint32_t mb_magic, mb2_info_t *mb_info)
      * Must be called before the managed boot payload so that
      * Zapada.BlockDev.ReadSector InternalCalls succeed.
      */
+    pci_dump_inventory();
     (void)virtio_blk_probe_and_init();
+    virtio_blk_dump_inventory();
 
     phase_gates_run();
 

@@ -13,9 +13,8 @@
 #
 # The resulting disk image contains:
 #   - GPT partition table
-#   - Partition 1: ZAPADA_BOOT (FAT32, 32 MiB)
-#   - Partition 2: ZAPADA_SYS  (FAT32, 48 MiB)
-#   - Partition 3: ZAPADA_DATA (ext4, 16 MiB, contains /dummy.txt)
+#   - Partition 1: ZAPADA_BOOT (ext4, 64 MiB, mounted as / by the managed boot flow)
+#   - Partition 2: ZAPADA_DATA (FAT32, 32 MiB, mounted as /mnt/c by /etc/fstab)
 #   - Signature "ZAPADASK" at byte offset 0-7 of sector 0
 #
 # Gate check: the kernel's Phase 3A Part 2 test reads LBA 0 and expects

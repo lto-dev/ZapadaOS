@@ -43,6 +43,13 @@ using System;
 
 namespace Zapada.Boot
 {
+    internal sealed class GptPartitionInfo
+    {
+        internal long StartLba;
+        internal long EndLba;
+        internal long SectorCount;
+    }
+
     internal static class Gpt
     {
         /* GPT header magic words (little-endian int32 view of "EFI PART") */
@@ -67,66 +74,56 @@ namespace Zapada.Boot
                 && BufHelper.GetDword(buf, entOff + 12) == 0;
         }
 
-        /* ------------------------------------------------------------------
-         * IsZapadaBoot - returns true when the partition name (at entOff+56)
-         * equals "ZAPADA_BOOT" in UTF-16LE with a null terminator at char 10.
-         * ------------------------------------------------------------------ */
-        private static bool IsZapadaBoot(int[] buf, int entOff)
-        {
-            int nameOff = entOff + 56;
-            return BufHelper.GetByte(buf, nameOff +  0) == 'Z' && BufHelper.GetByte(buf, nameOff +  1) == 0
-                && BufHelper.GetByte(buf, nameOff +  2) == 'A' && BufHelper.GetByte(buf, nameOff +  3) == 0
-                && BufHelper.GetByte(buf, nameOff +  4) == 'P' && BufHelper.GetByte(buf, nameOff +  5) == 0
-                && BufHelper.GetByte(buf, nameOff +  6) == 'A' && BufHelper.GetByte(buf, nameOff +  7) == 0
-                && BufHelper.GetByte(buf, nameOff +  8) == 'D' && BufHelper.GetByte(buf, nameOff +  9) == 0
-                && BufHelper.GetByte(buf, nameOff + 10) == 'A' && BufHelper.GetByte(buf, nameOff + 11) == 0
-                && BufHelper.GetByte(buf, nameOff + 12) == '_' && BufHelper.GetByte(buf, nameOff + 13) == 0
-                && BufHelper.GetByte(buf, nameOff + 14) == 'B' && BufHelper.GetByte(buf, nameOff + 15) == 0
-                && BufHelper.GetByte(buf, nameOff + 16) == 'O' && BufHelper.GetByte(buf, nameOff + 17) == 0
-                && BufHelper.GetByte(buf, nameOff + 18) == 'O' && BufHelper.GetByte(buf, nameOff + 19) == 0
-                && BufHelper.GetByte(buf, nameOff + 20) == 'T' && BufHelper.GetByte(buf, nameOff + 21) == 0
-                && BufHelper.GetByte(buf, nameOff + 22) == 0
-                && BufHelper.GetByte(buf, nameOff + 23) == 0;
-        }
-
-        private static void DebugWritePartitionName(int[] buf, int entOff)
+        private static bool NameMatches(int[] buf, int entOff, string name)
         {
             int nameOff = entOff + 56;
             int i = 0;
-            while (i < 6)
+            while (i < name.Length)
             {
-                int word = BufHelper.GetDword(buf, nameOff + i * 4);
-                if (word == 0)
-                    break;
+                if (BufHelper.GetByte(buf, nameOff + i * 2) != name[i])
+                    return false;
 
-                if (i != 0)
-                    Console.Write(" ");
-
-                Console.Write(word.ToString("X2"));
+                if (BufHelper.GetByte(buf, nameOff + i * 2 + 1) != 0)
+                    return false;
 
                 i = i + 1;
             }
+
+            return BufHelper.GetByte(buf, nameOff + i * 2) == 0
+                && BufHelper.GetByte(buf, nameOff + i * 2 + 1) == 0;
         }
 
         /* ------------------------------------------------------------------
-         * FindZapadaBootPartition
+         * FindPartitionByName
          *
          * Reads the GPT header from LBA 1, then iterates the partition entry
-         * array looking for a partition named "ZAPADA_BOOT".
+         * array looking for a partition with the requested name.
          *
-         * Returns the StartingLBA of the ZAPADA_BOOT partition (fits in int32
-         * for our 100 MiB test disk), or -1 if not found or on I/O error.
+         * Returns the StartingLBA of the partition (fits in int32 for our test
+         * disk), or -1 if not found or on I/O error.
          * ------------------------------------------------------------------ */
-        internal static int FindZapadaBootPartition()
+        internal static int FindPartitionByName(string partitionName)
+        {
+            GptPartitionInfo info = FindPartitionInfoByName(partitionName);
+            if (info == null)
+                return -1;
+
+            return (int)info.StartLba;
+        }
+
+        internal static GptPartitionInfo FindPartitionInfoByName(string partitionName)
         {
             int[] hdrBuf = new int[128];   /* 512 bytes / 4 = 128 int32 elements */
             int[] entBuf = new int[128];
+
+            if (partitionName == null || partitionName.Length == 0)
+                return null;
 
             /* Read GPT header at LBA 1. */
             if (Zapada.BlockDev.ReadSector(1L, 1, hdrBuf) != 0)
             {
                 Console.Write("[Gpt] I/O error reading LBA 1\n");
-                return -1;
+                return null;
             }
 
             /* Verify GPT signature. */
@@ -134,7 +131,7 @@ namespace Zapada.Boot
                 BufHelper.GetDword(hdrBuf, 4) != GPT_SIG_HI)
             {
                 Console.Write("[Gpt] bad signature\n");
-                return -1;
+                return null;
             }
 
             /* Read partition table parameters from the header. */
@@ -154,7 +151,7 @@ namespace Zapada.Boot
             if (entSize != GPT_ENTRY_SIZE || entCount <= 0)
             {
                 Console.Write("[Gpt] unsupported entry format\n");
-                return -1;
+                return null;
             }
 
             /* Scan partition entries: 4 per sector (128 bytes each). */
@@ -171,7 +168,7 @@ namespace Zapada.Boot
                     if (Zapada.BlockDev.ReadSector(secLba, 1, entBuf) != 0)
                     {
                         Console.Write("[Gpt] I/O error reading partition table\n");
-                        return -1;
+                        return null;
                     }
                     secIdx = secIdx + 1;
                 }
@@ -190,27 +187,43 @@ namespace Zapada.Boot
                     Console.Write((int)startLba);
                     Console.Write(" end=");
                     Console.Write((int)endLba);
-                    Console.Write(" name=");
-                    DebugWritePartitionName(entBuf, entOff);
                     Console.Write("\n");
 
-                    /* Check for ZAPADA_BOOT name. */
-                    if (IsZapadaBoot(entBuf, entOff))
+                    if (NameMatches(entBuf, entOff, partitionName))
                     {
                         /* Return starting LBA (truncated to int32, safe for 100 MiB disk). */
-                        Console.Write("[Gpt] matched ZAPADA_BOOT idx=");
+                        Console.Write("[Gpt] matched ");
+                        Console.Write(partitionName);
+                        Console.Write(" idx=");
                         Console.Write(entIdx);
                         Console.Write("\n");
-                        return (int)startLba;
+                        GptPartitionInfo info = new GptPartitionInfo();
+                        info.StartLba = startLba;
+                        info.EndLba = endLba;
+                        info.SectorCount = endLba - startLba + 1;
+                        return info;
                     }
                 }
 
                 entIdx = entIdx + 1;
             }
 
-            Console.Write("[Gpt] ZAPADA_BOOT partition not found\n");
-            return -1;
+            Console.Write("[Gpt] partition not found: ");
+            Console.Write(partitionName);
+            Console.Write("\n");
+            return null;
         }
+
+        internal static int FindZapadaBootPartition()
+        {
+            return FindPartitionByName("ZAPADA_BOOT");
+        }
+
+        internal static int FindZapadaRootPartition()
+        {
+            return FindPartitionByName("ZAPADA_BOOT");
+        }
+
     }
 }
 

@@ -61,11 +61,21 @@ internal static class MountTable
         }
 
         int slot = s_count;
-        //TODO: do this in new gc 
-        //global::System.GC.Pin(volume);
         SetSlot(slot, path, volume);
         s_count++;
         return slot;
+    }
+
+    public static int ReplaceRoot(MountedVolume volume)
+    {
+        if (volume == null)
+            return StorageStatus.InvalidArgument;
+
+        if (s_count <= 0)
+            s_count = 1;
+
+        SetSlot(0, "/", volume);
+        return StorageStatus.Ok;
     }
 
     /// <summary>

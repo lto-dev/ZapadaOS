@@ -243,6 +243,8 @@ function Restore-ManagedCacheToBuild {
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Gpt.dll"); Target = (Join-Path (Get-Location).Path "build\gpt.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Storage.dll"); Target = (Join-Path (Get-Location).Path "build\storage.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Fat32.dll"); Target = (Join-Path (Get-Location).Path "build\fat32.dll") },
+        @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Ext.dll"); Target = (Join-Path (Get-Location).Path "build\ext.dll") },
+        @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Ext4.dll"); Target = (Join-Path (Get-Location).Path "build\ext4.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Vfs.dll"); Target = (Join-Path (Get-Location).Path "build\vfs.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Conformance.CrossAsm.dll"); Target = (Join-Path (Get-Location).Path "build\conf-crossasm.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Conformance.dll"); Target = (Join-Path (Get-Location).Path "build\conf.dll") }
@@ -492,6 +494,82 @@ function Invoke-Fat32Build {
     return $true
 }
 
+function Invoke-ExtBuild {
+    $extProject = Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext\Zapada.Fs.Ext.csproj"
+    $extBinDll  = Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext\bin\$BuildConfig\net10.0\Zapada.Fs.Ext.dll"
+    $extDest    = Join-Path (Get-Location).Path "build\ext.dll"
+
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        Write-Host "  WARNING: 'dotnet' not found; Zapada.Fs.Ext not built; Ext4 dependency will be missing." -ForegroundColor Yellow
+        return $true
+    }
+
+    if (-not (Test-Path $extProject)) {
+        Write-Host "  WARNING: Zapada.Fs.Ext.csproj not found; skipping Ext shared build." -ForegroundColor Yellow
+        return $true
+    }
+
+    Write-Host "  Building Ext shared library (Zapada.Fs.Ext)..." -ForegroundColor Cyan
+    dotnet build $extProject -c $BuildConfig --nologo 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: dotnet build Zapada.Fs.Ext failed." -ForegroundColor Red
+        return $false
+    }
+
+    if (-not (Test-Path $extBinDll)) {
+        Write-Host "  ERROR: $extBinDll not found after build." -ForegroundColor Red
+        return $false
+    }
+
+    $buildDir = Join-Path (Get-Location).Path "build"
+    if (-not (Test-Path $buildDir)) {
+        New-Item -ItemType Directory -Path $buildDir | Out-Null
+    }
+
+    Copy-Item $extBinDll $extDest -Force
+    $sz = (Get-Item $extDest).Length
+    Write-Host "  Staged: $extDest ($sz bytes)." -ForegroundColor Gray
+    return $true
+}
+
+function Invoke-Ext4Build {
+    $ext4Project = Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext4\Zapada.Fs.Ext4.csproj"
+    $ext4BinDll  = Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext4\bin\$BuildConfig\net10.0\Zapada.Fs.Ext4.dll"
+    $ext4Dest    = Join-Path (Get-Location).Path "build\ext4.dll"
+
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        Write-Host "  WARNING: 'dotnet' not found; Zapada.Fs.Ext4 not built; Phase-Ext4Driver gate will not pass." -ForegroundColor Yellow
+        return $true
+    }
+
+    if (-not (Test-Path $ext4Project)) {
+        Write-Host "  WARNING: Zapada.Fs.Ext4.csproj not found; skipping Ext4 driver build." -ForegroundColor Yellow
+        return $true
+    }
+
+    Write-Host "  Building Ext4 driver (Zapada.Fs.Ext4)..." -ForegroundColor Cyan
+    dotnet build $ext4Project -c $BuildConfig --nologo 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: dotnet build Zapada.Fs.Ext4 failed." -ForegroundColor Red
+        return $false
+    }
+
+    if (-not (Test-Path $ext4BinDll)) {
+        Write-Host "  ERROR: $ext4BinDll not found after build." -ForegroundColor Red
+        return $false
+    }
+
+    $buildDir = Join-Path (Get-Location).Path "build"
+    if (-not (Test-Path $buildDir)) {
+        New-Item -ItemType Directory -Path $buildDir | Out-Null
+    }
+
+    Copy-Item $ext4BinDll $ext4Dest -Force
+    $sz = (Get-Item $ext4Dest).Length
+    Write-Host "  Staged: $ext4Dest ($sz bytes)." -ForegroundColor Gray
+    return $true
+}
+
 function Invoke-VfsBuild {
     # Build Zapada.Fs.Vfs and stage build/vfs.dll for the Phase 3.1 D.4 gate.
     # Must be called AFTER the native clean/build sequence because build artifacts can be recreated.
@@ -626,31 +704,39 @@ function Invoke-Build {
     }
 
     # Stage build/vblk.dll AFTER the native clean/build sequence for Phase 3.1 D.1 VBLK.DLL driver gate.
-    # make-disk uses this file as the VBLK.DLL payload written to ZAPADA_BOOT FAT32.
+    # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-VblkBuild)) {
         return $false
     }
 
     # Stage build/gpt.dll AFTER the native clean/build sequence for Phase 3.1 D.2 GPT.DLL driver gate.
-    # make-disk uses this file as the GPT.DLL payload written to ZAPADA_BOOT FAT32.
+    # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-GptBuild)) {
         return $false
     }
 
     # Stage build/storage.dll AFTER the native clean/build sequence for Phase 2B STORAGE.DLL driver gate.
-    # make-disk uses this file as the STORAGE.DLL payload written to ZAPADA_BOOT FAT32.
+    # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-StorageBuild)) {
         return $false
     }
 
     # Stage build/fat32.dll AFTER the native clean/build sequence for Phase 3.1 D.3 FAT32.DLL driver gate.
-    # make-disk uses this file as the FAT32.DLL payload written to ZAPADA_BOOT FAT32.
+    # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-Fat32Build)) {
         return $false
     }
 
+    if (-not (Invoke-ExtBuild)) {
+        return $false
+    }
+
+    if (-not (Invoke-Ext4Build)) {
+        return $false
+    }
+
     # Stage build/vfs.dll AFTER the native clean/build sequence for Phase 3.1 D.4 VFS.DLL driver gate.
-    # make-disk uses this file as the VFS.DLL payload written to ZAPADA_BOOT FAT32.
+    # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-VfsBuild)) {
         return $false
     }
@@ -706,13 +792,14 @@ function Test-X86_64 {
     $logAbs  = (Resolve-Path ".\build").Path + "\serial.log"
     $diskAbs = (Resolve-Path ".\build").Path + "\disk.img"
     $args = @(
-        "-machine", "q35",
+        "-machine", "pc",
         "-cpu",     "qemu64",
         "-m",       "256M",
         "-cdrom",   $isoAbs,
         "-boot",    "d",
         "-serial",  "file:$logAbs",
         "-nographic",
+        "-net",     "none",
         "-no-reboot"
     )
     # Attach VirtIO block disk image for Phase 3A Part 2 gate check
@@ -720,7 +807,7 @@ function Test-X86_64 {
         $args += "-drive"
         $args += "file=$diskAbs,format=raw,if=none,id=d0"
         $args += "-device"
-        $args += "virtio-blk-pci,drive=d0"
+        $args += "virtio-blk-pci,drive=d0,disable-modern=on,disable-legacy=off,addr=0x4"
     }
 
     Write-Host "  Running QEMU (timeout: ${TimeoutSec}s)..." -ForegroundColor Gray
@@ -776,6 +863,12 @@ function Test-X86_64 {
         "Phase 3.1 D.3 FAT32 found",
         "Phase 3.1 D.3 FAT32 loaded",
         "Phase 3.1 D.3 FAT32 initialized",
+        "Phase Ext4 driver initialized",
+        "Phase Ext4 driver gate",
+        "Phase Ext4 root gate",
+        "Phase Ext4 read gate",
+        "Phase Ext4 fstab gate",
+        "Phase FAT32 mounted at /mnt/c gate",
         "Phase 3.1 D.4 VFS found",
         "Phase 3.1 D.4 VFS loaded",
         "Phase 3.1 D.4 VFS initialized",
@@ -831,6 +924,12 @@ function Test-X86_64 {
         "[Boot] found: Zapada.Fs.Fat32",
         "[Boot] Zapada.Fs.Fat32 loaded",
         "[Boot] FAT32 driver initialized",
+        "[Boot] Ext4 driver initialized",
+        "[Gate] Phase-Ext4Driver",
+        "[Gate] Phase-Ext4Root",
+        "[Gate] Phase-Ext4Read",
+        "[Gate] Phase-Ext4Fstab",
+        "[Gate] Phase-Fat32MntC",
         "[Boot] found: Zapada.Fs.Vfs",
         "[Boot] Zapada.Fs.Vfs loaded",
         "[Boot] VFS initialized",
@@ -1043,6 +1142,12 @@ function Test-AArch64 {
         "Phase 3.1 D.3 FAT32 found",
         "Phase 3.1 D.3 FAT32 loaded",
         "Phase 3.1 D.3 FAT32 initialized",
+        "Phase Ext4 driver initialized",
+        "Phase Ext4 driver gate",
+        "Phase Ext4 root gate",
+        "Phase Ext4 read gate",
+        "Phase Ext4 fstab gate",
+        "Phase FAT32 mounted at /mnt/c gate",
         "Phase 3.1 D.4 VFS found",
         "Phase 3.1 D.4 VFS loaded",
         "Phase 3.1 D.4 VFS initialized",
@@ -1098,6 +1203,12 @@ function Test-AArch64 {
         "[Boot] found: Zapada.Fs.Fat32",
         "[Boot] Zapada.Fs.Fat32 loaded",
         "[Boot] FAT32 driver initialized",
+        "[Boot] Ext4 driver initialized",
+        "[Gate] Phase-Ext4Driver",
+        "[Gate] Phase-Ext4Root",
+        "[Gate] Phase-Ext4Read",
+        "[Gate] Phase-Ext4Fstab",
+        "[Gate] Phase-Fat32MntC",
         "[Boot] found: Zapada.Fs.Vfs",
         "[Boot] Zapada.Fs.Vfs loaded",
         "[Boot] VFS initialized",

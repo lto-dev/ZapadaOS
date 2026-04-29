@@ -724,6 +724,10 @@ $(INITRAMFS_IMG): | $(BUILD_DIR)
 	elif [ -f $(SRC_DIR)/managed/Zapada.Storage/bin/Release/net10.0/Zapada.Storage.dll ]; then cp $(SRC_DIR)/managed/Zapada.Storage/bin/Release/net10.0/Zapada.Storage.dll $(BUILD_DIR)/initramfs_root/Zapada.Storage.dll; fi
 	@if [ -f $(BUILD_DIR)/fat32.dll ]; then cp $(BUILD_DIR)/fat32.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Fat32.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Fat32/bin/Release/net10.0/Zapada.Fs.Fat32.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Fat32/bin/Release/net10.0/Zapada.Fs.Fat32.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Fat32.dll; fi
+	@if [ -f $(BUILD_DIR)/ext.dll ]; then cp $(BUILD_DIR)/ext.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Ext.dll; \
+	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Ext/bin/Release/net10.0/Zapada.Fs.Ext.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Ext/bin/Release/net10.0/Zapada.Fs.Ext.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Ext.dll; fi
+	@if [ -f $(BUILD_DIR)/ext4.dll ]; then cp $(BUILD_DIR)/ext4.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Ext4.dll; \
+	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Ext4/bin/Release/net10.0/Zapada.Fs.Ext4.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Ext4/bin/Release/net10.0/Zapada.Fs.Ext4.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Ext4.dll; fi
 	@if [ -f $(BUILD_DIR)/vfs.dll ]; then cp $(BUILD_DIR)/vfs.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Vfs.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Vfs/bin/Release/net10.0/Zapada.Fs.Vfs.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Vfs/bin/Release/net10.0/Zapada.Fs.Vfs.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Vfs.dll; fi
 	@if [ -f $(BUILD_DIR)/conf-crossasm.dll ]; then cp $(BUILD_DIR)/conf-crossasm.dll $(BUILD_DIR)/initramfs_root/Zapada.Conformance.CrossAsm.dll; \

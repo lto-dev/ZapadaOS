@@ -4,7 +4,7 @@
  * Phase 3.1: VirtioBlock driver entry point.
  *
  * DllMain.Initialize() is invoked by BootLoader.cs via RuntimeCallMethod
- * after VBLK.DLL is loaded from the ZAPADA_BOOT FAT32 partition.
+ * after the managed boot flow loads the driver payload.
  *
  * This is the Phase 3.1 gate for managed driver loading.  Initialize()
  * prints the driver gate line and returns 1 to signal success.

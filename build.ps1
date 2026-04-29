@@ -248,6 +248,8 @@ function Restore-ManagedCacheToBuild {
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Drivers.VirtioBlock.dll"); Target = (Join-Path (Get-Location).Path "build\vblk.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Gpt.dll"); Target = (Join-Path (Get-Location).Path "build\gpt.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Fat32.dll"); Target = (Join-Path (Get-Location).Path "build\fat32.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Ext.dll"); Target = (Join-Path (Get-Location).Path "build\ext.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Ext4.dll"); Target = (Join-Path (Get-Location).Path "build\ext4.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Storage.dll"); Target = (Join-Path (Get-Location).Path "build\storage.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Vfs.dll"); Target = (Join-Path (Get-Location).Path "build\vfs.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Conformance.CrossAsm.dll"); Target = (Join-Path (Get-Location).Path "build\conf-crossasm.dll"); Required = $false },
@@ -364,6 +366,28 @@ Publish-ManagedAssembly `
     -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Fs.Fat32 not built; Zapada.Fs.Fat32.dll will be missing." `
     -MissingProjectMessage "  WARNING: Zapada.Fs.Fat32.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Fat32\Zapada.Fs.Fat32.csproj"); skipping." `
     -PublishFailureMessage "ERROR: dotnet publish Zapada.Fs.Fat32 failed."
+
+Publish-ManagedAssembly `
+    -DisplayName "Ext shared library (Zapada.Fs.Ext)" `
+    -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext\Zapada.Fs.Ext.csproj") `
+    -PublishOut (Join-Path (Get-Location).Path "build\ext-out") `
+    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\ext-out") "Zapada.Fs.Ext.dll") `
+    -StagedDllPath (Join-Path (Get-Location).Path "build\ext.dll") `
+    -CacheDllPath (Join-Path $managedCacheRoot "Zapada.Fs.Ext.dll") `
+    -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Fs.Ext not built; Zapada.Fs.Ext.dll will be missing." `
+    -MissingProjectMessage "  WARNING: Zapada.Fs.Ext.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext\Zapada.Fs.Ext.csproj"); skipping." `
+    -PublishFailureMessage "ERROR: dotnet publish Zapada.Fs.Ext failed."
+
+Publish-ManagedAssembly `
+    -DisplayName "Ext4 driver (Zapada.Fs.Ext4)" `
+    -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext4\Zapada.Fs.Ext4.csproj") `
+    -PublishOut (Join-Path (Get-Location).Path "build\ext4-out") `
+    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\ext4-out") "Zapada.Fs.Ext4.dll") `
+    -StagedDllPath (Join-Path (Get-Location).Path "build\ext4.dll") `
+    -CacheDllPath (Join-Path $managedCacheRoot "Zapada.Fs.Ext4.dll") `
+    -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Fs.Ext4 not built; Zapada.Fs.Ext4.dll will be missing." `
+    -MissingProjectMessage "  WARNING: Zapada.Fs.Ext4.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Ext4\Zapada.Fs.Ext4.csproj"); skipping." `
+    -PublishFailureMessage "ERROR: dotnet publish Zapada.Fs.Ext4 failed."
 
 Publish-ManagedAssembly `
     -DisplayName "Storage abstractions (Zapada.Storage)" `
