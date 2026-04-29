@@ -166,7 +166,7 @@ namespace Zapada.Boot
 
             if (Zapada.BlockDev.ReadSector((long)partitionStartLba, 1, bpb) != 0)
             {
-                System.Console.Write("[Fat32] I/O error reading BPB\n");
+                Console.Write("[Fat32] I/O error reading BPB\n");
                 return -1;
             }
 
@@ -182,7 +182,7 @@ namespace Zapada.Boot
             /* Validate bytes-per-sector. */
             if (bps != 512)
             {
-                System.Console.Write("[Fat32] unsupported sector size\n");
+                Console.Write("[Fat32] unsupported sector size\n");
                 return -1;
             }
 
@@ -190,7 +190,7 @@ namespace Zapada.Boot
             int fatSize = (fatSize16 != 0) ? fatSize16 : fatSize32;
             if (fatSize == 0 || spc == 0)
             {
-                System.Console.Write("[Fat32] invalid BPB\n");
+                Console.Write("[Fat32] invalid BPB\n");
                 return -1;
             }
 
@@ -200,11 +200,11 @@ namespace Zapada.Boot
             s_dataStart   = s_fatStart + fatCount * fatSize;
             s_rootCluster = rootCluster;
 
-            System.Console.Write("[Fat32] mounted: spc=");
-            Console.WriteInt(spc);
-            System.Console.Write(" root=");
-            Console.WriteInt(rootCluster);
-            System.Console.Write("\n");
+            Console.Write("[Fat32] mounted: spc=");
+            Console.Write(spc);
+            Console.Write(" root=");
+            Console.Write(rootCluster);
+            Console.Write("\n");
 
             return 0;
         }
@@ -242,7 +242,7 @@ namespace Zapada.Boot
                 {
                     if (Zapada.BlockDev.ReadSector((long)(clusterLba + sec), 1, secBuf) != 0)
                     {
-                        System.Console.Write("[Fat32] I/O error reading dir\n");
+                        Console.Write("[Fat32] I/O error reading dir\n");
                         return -1;
                     }
 
@@ -279,7 +279,7 @@ namespace Zapada.Boot
                                     s_testDllCluster = fileCluster;
                                     s_testDllSize    = fileSize;
 
-                                    System.Console.Write("[Boot] found: TEST.DLL\n");
+                                    Console.Write("[Boot] found: TEST.DLL\n");
 
                                     /* Print first 8 bytes of file content as hex. */
                                     PrintFirstBytes(fileCluster, fatBuf, secBuf);
@@ -298,7 +298,7 @@ namespace Zapada.Boot
                 int next = ReadFatEntry(cluster, fatBuf);
                 if (next < 0)
                 {
-                    System.Console.Write("[Fat32] FAT read error\n");
+                    Console.Write("[Fat32] FAT read error\n");
                     return -1;
                 }
                 cluster = next;
@@ -432,7 +432,7 @@ namespace Zapada.Boot
                 {
                     if (Zapada.BlockDev.ReadSector((long)(clusterLba + sec), 1, secBuf) != 0)
                     {
-                        System.Console.Write("[Fat32] I/O error reading dir\n");
+                        Console.Write("[Fat32] I/O error reading dir\n");
                         return -1;
                     }
 
@@ -469,7 +469,7 @@ namespace Zapada.Boot
                 int next = ReadFatEntry(cluster, fatBuf);
                 if (next < 0)
                 {
-                    System.Console.Write("[Fat32] FAT read error\n");
+                    Console.Write("[Fat32] FAT read error\n");
                     return -1;
                 }
                 cluster = next;
@@ -552,30 +552,30 @@ namespace Zapada.Boot
             /* Unused parameter — reuse secBuf as file read buffer. */
             if (fileCluster < 2)
             {
-                System.Console.Write("[Boot] file empty\n");
+                Console.Write("[Boot] file empty\n");
                 return;
             }
 
             int lba = ClusterToLba(fileCluster);
             if (Zapada.BlockDev.ReadSector((long)lba, 1, secBuf) != 0)
             {
-                System.Console.Write("[Boot] file read error\n");
+                Console.Write("[Boot] file read error\n");
                 return;
             }
 
             /* Print first 8 bytes as "XX XX XX XX XX XX XX XX". */
-            System.Console.Write("[Boot] bytes: ");
+            Console.Write("[Boot] bytes: ");
             int i = 0;
             while (i < 8)
             {
                 if (i != 0)
                 {
-                    System.Console.Write(" ");
+                    Console.Write(" ");
                 }
-                Console.WriteHex(BufHelper.GetByte(secBuf, i));
+                Console.Write(BufHelper.GetByte(secBuf, i).ToString("X2"));
                 i = i + 1;
             }
-            System.Console.Write("\n");
+            Console.Write("\n");
         }
 
         /* ------------------------------------------------------------------ */
@@ -633,7 +633,7 @@ namespace Zapada.Boot
                 {
                     if (Zapada.BlockDev.ReadSector((long)(clusterLba + sec), 1, secBuf) != 0)
                     {
-                        System.Console.Write("[Fat32] I/O error reading dir\n");
+                        Console.Write("[Fat32] I/O error reading dir\n");
                         return -1;
                     }
 
@@ -670,7 +670,7 @@ namespace Zapada.Boot
                 int next = ReadFatEntry(cluster, fatBuf);
                 if (next < 0)
                 {
-                    System.Console.Write("[Fat32] FAT read error\n");
+                    Console.Write("[Fat32] FAT read error\n");
                     return -1;
                 }
                 cluster = next;
@@ -798,7 +798,7 @@ namespace Zapada.Boot
                 {
                     if (Zapada.BlockDev.ReadSector((long)(clusterLba + sec), 1, secBuf) != 0)
                     {
-                        System.Console.Write("[Fat32] I/O error reading dir\n");
+                        Console.Write("[Fat32] I/O error reading dir\n");
                         return -1;
                     }
 

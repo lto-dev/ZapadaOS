@@ -11,6 +11,8 @@
  * All boot work is delegated to BootLoader.Run() to keep Program.cs minimal.
  */
 
+using System;
+
 namespace Zapada.Boot
 {
     internal static class Program
@@ -24,7 +26,7 @@ namespace Zapada.Boot
          */
         static void Main()
         {
-            System.Console.Write("--- Zapada.Boot.Main ---\n");
+            Console.Write("--- Zapada.Boot.Main ---\n");
             BootLoader.Run();
         }
     }

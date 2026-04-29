@@ -3773,6 +3773,54 @@ namespace
         }
     }
 
+    static struct zaclr_result push_pointer_offset_result(struct zaclr_frame* frame,
+                                                          enum zaclr_opcode opcode,
+                                                          const struct zaclr_stack_value* pointer_value,
+                                                          const struct zaclr_stack_value* offset_value,
+                                                          bool scale_by_payload_size)
+    {
+        int64_t offset;
+        struct zaclr_stack_value result_value;
+        struct zaclr_result result;
+
+        if (frame == NULL || pointer_value == NULL || offset_value == NULL
+            || pointer_value->kind != ZACLR_STACK_VALUE_BYREF)
+        {
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+        }
+
+        result = stack_value_to_i64(offset_value, &offset);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+
+        result_value = *pointer_value;
+        if (opcode == CEE_SUB)
+        {
+            offset = -offset;
+        }
+
+        if (scale_by_payload_size && pointer_value->payload_size != 0u)
+        {
+            offset *= (int64_t)pointer_value->payload_size;
+        }
+
+        result_value.data.raw = (uintptr_t)((uint8_t*)(uintptr_t)pointer_value->data.raw + offset);
+        return zaclr_eval_stack_push(&frame->eval_stack, &result_value);
+    }
+
+    static bool is_byref_plus_or_minus_integer(enum zaclr_opcode opcode,
+                                               const struct zaclr_stack_value* left,
+                                               const struct zaclr_stack_value* right)
+    {
+        return (opcode == CEE_ADD || opcode == CEE_SUB)
+            && left != NULL
+            && right != NULL
+            && left->kind == ZACLR_STACK_VALUE_BYREF
+            && (right->kind == ZACLR_STACK_VALUE_I4 || right->kind == ZACLR_STACK_VALUE_I8);
+    }
+
     static struct zaclr_result push_binary_i8_result(struct zaclr_frame* frame,
                                                      enum zaclr_opcode opcode,
                                                      int64_t left,
@@ -9762,6 +9810,16 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             }
 
             frame->il_offset += 1u;
+            if (is_byref_plus_or_minus_integer(opcode, &left, &right))
+            {
+                return push_pointer_offset_result(frame, opcode, &left, &right, false);
+            }
+
+            if (opcode == CEE_ADD && is_byref_plus_or_minus_integer(opcode, &right, &left))
+            {
+                return push_pointer_offset_result(frame, opcode, &right, &left, false);
+            }
+
             if (left.kind == ZACLR_STACK_VALUE_R4 || left.kind == ZACLR_STACK_VALUE_R8
                 || right.kind == ZACLR_STACK_VALUE_R4 || right.kind == ZACLR_STACK_VALUE_R8)
             {

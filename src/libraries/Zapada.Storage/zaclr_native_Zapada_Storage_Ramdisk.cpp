@@ -11,23 +11,42 @@ extern "C" {
 
 namespace
 {
-    static int32_t lookup_index(const char* filename)
+    static bool cpio_name_matches_managed_utf16_string(const char* cpio_name,
+                                                       const struct zaclr_string_desc* managed_name)
+    {
+        uint32_t index = 0u;
+        uint32_t managed_length;
+
+        if (cpio_name == NULL || managed_name == NULL)
+        {
+            return false;
+        }
+
+        managed_length = zaclr_string_length(managed_name);
+        while (index < managed_length && cpio_name[index] != '\0')
+        {
+            if ((uint16_t)(uint8_t)cpio_name[index] != zaclr_string_char_at(managed_name, index))
+            {
+                return false;
+            }
+
+            ++index;
+        }
+
+        return index == managed_length && cpio_name[index] == '\0';
+    }
+
+    static int32_t lookup_index(const struct zaclr_string_desc* managed_name)
     {
         for (uint32_t i = 0u; i < ramdisk_file_count(); ++i)
         {
             ramdisk_file_t file = {};
-            size_t index = 0u;
-            if (filename == NULL || ramdisk_get_file(i, &file) != RAMDISK_OK || file.filename == NULL)
+            if (ramdisk_get_file(i, &file) != RAMDISK_OK)
             {
                 continue;
             }
 
-            while (file.filename[index] != '\0' && filename[index] != '\0' && file.filename[index] == filename[index])
-            {
-                ++index;
-            }
-
-            if (file.filename[index] == '\0' && filename[index] == '\0')
+            if (cpio_name_matches_managed_utf16_string(file.filename, managed_name))
             {
                 return (int32_t)i;
             }
@@ -51,7 +70,7 @@ struct zaclr_result zaclr_native_Zapada_Storage_Ramdisk::Lookup___STATIC__I4__ST
         return status;
     }
 
-    return zaclr_native_call_frame_set_i4(&frame, lookup_index(filename != NULL ? zaclr_string_ascii_chars(filename) : NULL));
+    return zaclr_native_call_frame_set_i4(&frame, lookup_index(filename));
 }
 
 struct zaclr_result zaclr_native_Zapada_Storage_Ramdisk::Read___STATIC__I4__I4__SZARRAY_U1__I4__I4(struct zaclr_native_call_frame& frame)

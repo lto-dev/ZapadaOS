@@ -134,7 +134,7 @@ extern "C" struct zaclr_result zaclr_binder_bind(struct zaclr_loader* loader,
     struct zaclr_assembly_image assembly_image;
     struct zaclr_loaded_assembly loaded_assembly;
     struct zaclr_result result;
-    const char* source_name;
+    // const char* source_name;
 
     if (loader == NULL || domain == NULL || identity == NULL || identity->name == NULL || out_assembly == NULL)
     {
@@ -154,14 +154,14 @@ extern "C" struct zaclr_result zaclr_binder_bind(struct zaclr_loader* loader,
     }
 
     assembly_image = {};
-    source_name = domain->source->name != NULL ? domain->source->name : "<unnamed>";
-    console_write("[ZACLR][binder] locate source=");
-    console_write(source_name);
-    console_write("\n");
+    // source_name = domain->source->name != NULL ? domain->source->name : "<unnamed>";
+    // console_write("[ZACLR][binder] locate source=");
+    // console_write(source_name);
+    // console_write("\n");
     result = domain->source->locate(domain->source->context, identity, &assembly_image);
-    console_write("[ZACLR][binder] locate status=");
-    console_write_dec((uint64_t)result.status);
-    console_write("\n");
+    // console_write("[ZACLR][binder] locate status=");
+    // console_write_dec((uint64_t)result.status);
+    // console_write("\n");
     if (result.status != ZACLR_STATUS_OK)
     {
         return result;
@@ -173,9 +173,9 @@ extern "C" struct zaclr_result zaclr_binder_bind(struct zaclr_loader* loader,
         slice.size = assembly_image.size;
         result = zaclr_loader_load_image(loader, &slice, &loaded_assembly);
     }
-    console_write("[ZACLR][binder] parse status=");
-    console_write_dec((uint64_t)result.status);
-    console_write("\n");
+    // console_write("[ZACLR][binder] parse status=");
+    // console_write_dec((uint64_t)result.status);
+    // console_write("\n");
     if (result.status != ZACLR_STATUS_OK)
     {
         if (assembly_image.caller_owns && domain->source->release != NULL)
@@ -188,9 +188,9 @@ extern "C" struct zaclr_result zaclr_binder_bind(struct zaclr_loader* loader,
 
     result = zaclr_loader_apply_assembly_name_fallback(&loaded_assembly,
                                                        assembly_image.source_label != NULL ? assembly_image.source_label : identity->name);
-    console_write("[ZACLR][binder] name fallback status=");
-    console_write_dec((uint64_t)result.status);
-    console_write("\n");
+    // console_write("[ZACLR][binder] name fallback status=");
+    // console_write_dec((uint64_t)result.status);
+    // console_write("\n");
     if (result.status != ZACLR_STATUS_OK)
     {
         zaclr_loader_release_loaded_assembly(&loaded_assembly);
@@ -203,9 +203,9 @@ extern "C" struct zaclr_result zaclr_binder_bind(struct zaclr_loader* loader,
     }
 
     result = zaclr_assembly_registry_register(&domain->registry, &loaded_assembly);
-    console_write("[ZACLR][binder] domain register status=");
-    console_write_dec((uint64_t)result.status);
-    console_write("\n");
+    // console_write("[ZACLR][binder] domain register status=");
+    // console_write_dec((uint64_t)result.status);
+    // console_write("\n");
     if (result.status == ZACLR_STATUS_ALREADY_EXISTS)
     {
         assembly = zaclr_assembly_registry_find_by_name(&domain->registry, loaded_assembly.assembly_name.text);
@@ -270,11 +270,11 @@ extern "C" struct zaclr_result zaclr_binder_load_assembly_by_path(struct zaclr_r
         return result;
     }
 
-    console_write("[ZACLR][binder] load_by_path candidate=");
-    console_write(image_path);
-    console_write(" identity=");
-    console_write(identity.name);
-    console_write("\n");
+    // console_write("[ZACLR][binder] load_by_path candidate=");
+    // console_write(image_path);
+    // console_write(" identity=");
+    // console_write(identity.name);
+    // console_write("\n");
 
     result = zaclr_binder_bind(&runtime->loader, &runtime->boot_launch.domain, &identity, &domain_assembly);
     if (result.status != ZACLR_STATUS_OK)
@@ -303,9 +303,9 @@ extern "C" struct zaclr_result zaclr_binder_load_assembly_by_name(struct zaclr_r
         return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_LOADER);
     }
 
-    console_write("[ZACLR][binder] begin assembly=");
-    console_write(assembly_name);
-    console_write("\n");
+    // console_write("[ZACLR][binder] begin assembly=");
+    // console_write(assembly_name);
+    // console_write("\n");
 
     result = build_identity_from_name(assembly_name, &identity);
     if (result.status != ZACLR_STATUS_OK)
@@ -314,17 +314,17 @@ extern "C" struct zaclr_result zaclr_binder_load_assembly_by_name(struct zaclr_r
     }
 
     result = zaclr_binder_bind(&runtime->loader, &runtime->boot_launch.domain, &identity, &domain_assembly);
-    console_write("[ZACLR][binder] bind status=");
-    console_write_dec((uint64_t)result.status);
-    console_write("\n");
+    // console_write("[ZACLR][binder] bind status=");
+    // console_write_dec((uint64_t)result.status);
+    // console_write("\n");
     if (result.status != ZACLR_STATUS_OK)
     {
         return result;
     }
 
     result = register_runtime_compat_assembly(runtime, domain_assembly, out_assembly);
-    console_write("[ZACLR][binder] compat register status=");
-    console_write_dec((uint64_t)result.status);
-    console_write("\n");
+    // console_write("[ZACLR][binder] compat register status=");
+    // console_write_dec((uint64_t)result.status);
+    // console_write("\n");
     return result;
 }

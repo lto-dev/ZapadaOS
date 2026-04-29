@@ -100,9 +100,9 @@ namespace Zapada.Boot
                     break;
 
                 if (i != 0)
-                    System.Console.Write(" ");
+                    Console.Write(" ");
 
-                Console.WriteHex(word);
+                Console.Write(word.ToString("X2"));
 
                 i = i + 1;
             }
@@ -125,7 +125,7 @@ namespace Zapada.Boot
             /* Read GPT header at LBA 1. */
             if (Zapada.BlockDev.ReadSector(1L, 1, hdrBuf) != 0)
             {
-                System.Console.Write("[Gpt] I/O error reading LBA 1\n");
+                Console.Write("[Gpt] I/O error reading LBA 1\n");
                 return -1;
             }
 
@@ -133,7 +133,7 @@ namespace Zapada.Boot
             if (BufHelper.GetDword(hdrBuf, 0) != GPT_SIG_LO ||
                 BufHelper.GetDword(hdrBuf, 4) != GPT_SIG_HI)
             {
-                System.Console.Write("[Gpt] bad signature\n");
+                Console.Write("[Gpt] bad signature\n");
                 return -1;
             }
 
@@ -142,18 +142,18 @@ namespace Zapada.Boot
             int  entCount   = BufHelper.GetDword(hdrBuf, 80);  /* NumPartitionEntries  */
             int  entSize    = BufHelper.GetDword(hdrBuf, 84);  /* SizeOfPartitionEntry */
 
-            System.Console.Write("[Gpt] header ptLba=");
-            Console.WriteInt((int)ptLba);
-            System.Console.Write(" entCount=");
-            Console.WriteInt(entCount);
-            System.Console.Write(" entSize=");
-            Console.WriteInt(entSize);
-            System.Console.Write("\n");
+            Console.Write("[Gpt] header ptLba=");
+            Console.Write((int)ptLba);
+            Console.Write(" entCount=");
+            Console.Write(entCount);
+            Console.Write(" entSize=");
+            Console.Write(entSize);
+            Console.Write("\n");
 
             /* We only support the standard 128-byte entry size. */
             if (entSize != GPT_ENTRY_SIZE || entCount <= 0)
             {
-                System.Console.Write("[Gpt] unsupported entry format\n");
+                Console.Write("[Gpt] unsupported entry format\n");
                 return -1;
             }
 
@@ -170,7 +170,7 @@ namespace Zapada.Boot
                     long secLba = ptLba + (long)secIdx;
                     if (Zapada.BlockDev.ReadSector(secLba, 1, entBuf) != 0)
                     {
-                        System.Console.Write("[Gpt] I/O error reading partition table\n");
+                        Console.Write("[Gpt] I/O error reading partition table\n");
                         return -1;
                     }
                     secIdx = secIdx + 1;
@@ -184,23 +184,23 @@ namespace Zapada.Boot
                     long startLba = BufHelper.GetQword(entBuf, entOff + 32);
                     long endLba   = BufHelper.GetQword(entBuf, entOff + 40);
 
-                    System.Console.Write("[Gpt] entry idx=");
-                    Console.WriteInt(entIdx);
-                    System.Console.Write(" start=");
-                    Console.WriteInt((int)startLba);
-                    System.Console.Write(" end=");
-                    Console.WriteInt((int)endLba);
-                    System.Console.Write(" name=");
+                    Console.Write("[Gpt] entry idx=");
+                    Console.Write(entIdx);
+                    Console.Write(" start=");
+                    Console.Write((int)startLba);
+                    Console.Write(" end=");
+                    Console.Write((int)endLba);
+                    Console.Write(" name=");
                     DebugWritePartitionName(entBuf, entOff);
-                    System.Console.Write("\n");
+                    Console.Write("\n");
 
                     /* Check for ZAPADA_BOOT name. */
                     if (IsZapadaBoot(entBuf, entOff))
                     {
                         /* Return starting LBA (truncated to int32, safe for 100 MiB disk). */
-                        System.Console.Write("[Gpt] matched ZAPADA_BOOT idx=");
-                        Console.WriteInt(entIdx);
-                        System.Console.Write("\n");
+                        Console.Write("[Gpt] matched ZAPADA_BOOT idx=");
+                        Console.Write(entIdx);
+                        Console.Write("\n");
                         return (int)startLba;
                     }
                 }
@@ -208,7 +208,7 @@ namespace Zapada.Boot
                 entIdx = entIdx + 1;
             }
 
-            System.Console.Write("[Gpt] ZAPADA_BOOT partition not found\n");
+            Console.Write("[Gpt] ZAPADA_BOOT partition not found\n");
             return -1;
         }
     }

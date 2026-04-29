@@ -1128,6 +1128,20 @@ namespace
             && text_equals(type->type_name.text, "Unsafe")
             && text_equals(method->name.text, name);
     }
+
+    static bool is_buffer_memmove_intrinsic(const struct zaclr_type_desc* type,
+                                            const struct zaclr_method_desc* method)
+    {
+        return type != NULL
+            && method != NULL
+            && type->type_namespace.text != NULL
+            && type->type_name.text != NULL
+            && method->name.text != NULL
+            && text_equals(method->name.text, "Memmove")
+            && method->signature.parameter_count == 3u
+            && ((text_equals(type->type_namespace.text, "System") && text_equals(type->type_name.text, "Buffer"))
+                || (text_equals(type->type_namespace.text, "System") && text_equals(type->type_name.text, "SpanHelpers")));
+    }
 }
 
 static uint32_t unsafe_generic_argument_width(const struct zaclr_generic_argument* argument)
@@ -1699,7 +1713,7 @@ static struct zaclr_result write_unaligned_stack_value(void* destination,
 }
 
 static struct zaclr_result invoke_unsafe_write_unaligned_intrinsic(struct zaclr_frame* frame,
-                                                                  const struct zaclr_method_desc* method)
+                                                                   const struct zaclr_method_desc* method)
 {
     struct zaclr_stack_value value = {};
     struct zaclr_stack_value destination_value = {};
@@ -1778,6 +1792,102 @@ static struct zaclr_result invoke_unsafe_write_unaligned_intrinsic(struct zaclr_
 
     (void)destination_type_token_raw;
     return write_unaligned_stack_value((void*)(uintptr_t)address, width, &value);
+}
+
+static struct zaclr_result invoke_buffer_memmove_intrinsic(struct zaclr_frame* frame,
+                                                           const struct zaclr_method_desc* method)
+{
+    struct zaclr_stack_value byte_count_value = {};
+    struct zaclr_stack_value source_value = {};
+    struct zaclr_stack_value destination_value = {};
+    uintptr_t destination_address = 0u;
+    uintptr_t source_address = 0u;
+    uint32_t destination_payload_size = 0u;
+    uint32_t source_payload_size = 0u;
+    uint32_t ignored_token = 0u;
+    uint64_t byte_count = 0u;
+    uint32_t element_size = 0u;
+    const struct zaclr_generic_argument* generic_argument;
+    struct zaclr_result result;
+
+    if (frame == NULL || method == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &byte_count_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &source_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = zaclr_eval_stack_pop(&frame->eval_stack, &destination_value);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = raw_address_from_stack_value(frame, &destination_value, &destination_address, &destination_payload_size, &ignored_token);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    result = raw_address_from_stack_value(frame, &source_value, &source_address, &source_payload_size, &ignored_token);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    if (byte_count_value.kind == ZACLR_STACK_VALUE_I8)
+    {
+        byte_count = (uint64_t)byte_count_value.data.i8;
+    }
+    else if (byte_count_value.kind == ZACLR_STACK_VALUE_I4)
+    {
+        byte_count = (uint64_t)(uint32_t)byte_count_value.data.i4;
+    }
+    else
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    generic_argument = zaclr_generic_context_get_method_argument(&frame->generic_context, 0u);
+    if (generic_argument != NULL)
+    {
+        element_size = unsafe_generic_argument_width(generic_argument);
+    }
+
+    if (element_size == 0u)
+    {
+        element_size = destination_payload_size != 0u ? destination_payload_size : source_payload_size;
+    }
+
+    if (element_size == 0u)
+    {
+        element_size = 1u;
+    }
+
+    if (destination_address == 0u || source_address == 0u)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    if (byte_count > ((uint64_t)0xFFFFFFFFu / (uint64_t)element_size))
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
+    }
+
+    kernel_memmove((void*)destination_address,
+                   (const void*)source_address,
+                   (size_t)(byte_count * (uint64_t)element_size));
+    return zaclr_result_ok();
 }
 
 static struct zaclr_result invoke_vector_ishardwareaccelerated_intrinsic(struct zaclr_frame* frame)
@@ -4242,6 +4352,11 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
     if (is_unsafe_named_intrinsic(effective_type, method, "WriteUnaligned"))
     {
         return invoke_unsafe_write_unaligned_intrinsic(frame, method);
+    }
+
+    if (is_buffer_memmove_intrinsic(effective_type, method))
+    {
+        return invoke_buffer_memmove_intrinsic(frame, method);
     }
 
     if (is_vector_ishardwareaccelerated_intrinsic(effective_type, method)

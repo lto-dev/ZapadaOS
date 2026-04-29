@@ -173,12 +173,12 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
                                                         &assembly);
     if (result.status != ZACLR_STATUS_OK)
     {
-        log_method_search_line("MethodSearch.AssemblyNotFound",
-                               owning_assembly->assembly_name.text,
-                               owning_type->type_namespace.text,
-                               owning_type->type_name.text,
-                               method->name.text,
-                               owning_assembly->id);
+        // log_method_search_line("MethodSearch.AssemblyNotFound",
+        //                        owning_assembly->assembly_name.text,
+        //                        owning_type->type_namespace.text,
+        //                        owning_type->type_name.text,
+        //                        method->name.text,
+        //                        owning_assembly->id);
         return result;
     }
 
@@ -190,24 +190,24 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
             && cache_entry->method != NULL
             && zaclr_native_bind_method_matches_managed(owning_assembly, owning_type, method, cache_entry->method))
         {
-            log_method_search_line("MethodSearch.CacheHit",
-                                   owning_assembly->assembly_name.text,
-                                   owning_type->type_namespace.text,
-                                   owning_type->type_name.text,
-                                   method->name.text,
-                                   cache_entry->method_row);
+            // log_method_search_line("MethodSearch.CacheHit",
+            //                        owning_assembly->assembly_name.text,
+            //                        owning_type->type_namespace.text,
+            //                        owning_type->type_name.text,
+            //                        method->name.text,
+            //                        cache_entry->method_row);
             out_resolution->assembly_name = assembly->assembly_name;
             out_resolution->method = cache_entry->method;
             return zaclr_result_ok();
         }
     }
 
-    log_method_search_line("MethodSearch.Searching",
-                           assembly->assembly_name,
-                           owning_type->type_namespace.text,
-                           owning_type->type_name.text,
-                           method->name.text,
-                           method->token.raw);
+    // log_method_search_line("MethodSearch.Searching",
+    //                        assembly->assembly_name,
+    //                        owning_type->type_namespace.text,
+    //                        owning_type->type_name.text,
+    //                        method->name.text,
+    //                        method->token.raw);
 
     for (method_index = 0u; method_index < assembly->method_count; ++method_index)
     {

@@ -55,27 +55,27 @@ namespace Zapada.Boot
          */
         internal static void Run()
         {
-            System.Console.Write("--- Zapada.Boot ---\n");
+            Console.Write("--- Zapada.Boot ---\n");
 
 
             /* ------------------------------------------------------------ */
             /* Conformance: CLR correctness tests — run FIRST.              */
             /* ------------------------------------------------------------ */
 
-            System.Console.Write("[Boot] loading: Zapada.Conformance\n");
+            Console.Write("[Boot] loading: Zapada.Conformance\n");
             if (Zapada.Conformance.DllMain.Initialize() != 0)
             {
-                System.Console.Write("[Boot] Conformance Initialize failed\n");
+                Console.Write("[Boot] Conformance Initialize failed\n");
             }
 
             /* ============================================================== */
             /* Phase 1: Storage abstractions                                  */
             /* ============================================================== */
 
-            System.Console.Write("[Boot] loading: Zapada.Storage\n");
+            Console.Write("[Boot] loading: Zapada.Storage\n");
             if (Zapada.Storage.DllMain.Initialize() != 0)
             {
-                System.Console.Write("[Boot] Storage Initialize failed\n");
+                Console.Write("[Boot] Storage Initialize failed\n");
             }
 
             // Phase 3: wire bootstrap RamFs root into VFS through cross-assembly
@@ -83,11 +83,11 @@ namespace Zapada.Boot
             int vfsBootstrap = Vfs.Initialize();
             if (vfsBootstrap != StorageStatus.Ok)
             {
-                System.Console.Write("[Boot] Bootstrap VFS init failed\n");
+                Console.Write("[Boot] Bootstrap VFS init failed\n");
             }
             else
             {
-                System.Console.Write("[Boot] Bootstrap VFS mounted at /\n");
+                Console.Write("[Boot] Bootstrap VFS mounted at /\n");
             }
 
             /* ============================================================== */
@@ -99,65 +99,65 @@ namespace Zapada.Boot
             /* Step 3a: find and invoke TEST.DLL (Zapada.Test.Hello).       */
             /* ------------------------------------------------------------ */
 
-            System.Console.Write("[Boot] invoking: Zapada.Test.Hello\n");
+            Console.Write("[Boot] invoking: Zapada.Test.Hello\n");
             Zapada.Test.Hello.Hello.Run();
 
             /* ------------------------------------------------------------ */
             /* Step D.1: initialize VirtioBlock driver.                     */
             /* ------------------------------------------------------------ */
 
-            System.Console.Write("[Boot] loading: Zapada.Drivers.VirtioBlock\n");
+            Console.Write("[Boot] loading: Zapada.Drivers.VirtioBlock\n");
             if (Zapada.Drivers.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] VBLK Initialize failed\n");
+                Console.Write("[Boot] VBLK Initialize failed\n");
             }
 
             /* ------------------------------------------------------------ */
             /* Step D.2: initialize GPT driver.                             */
             /* ------------------------------------------------------------ */
 
-            System.Console.Write("[Boot] loading: Zapada.Fs.Gpt\n");
+            Console.Write("[Boot] loading: Zapada.Fs.Gpt\n");
             if (Zapada.Fs.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] GPT Initialize failed\n");
+                Console.Write("[Boot] GPT Initialize failed\n");
             }
 
             /* ------------------------------------------------------------ */
             /* Step D.3: initialize managed FAT32 driver.                   */
             /* ------------------------------------------------------------ */
 
-            System.Console.Write("[Boot] loading: Zapada.Fs.Fat32\n");
+            Console.Write("[Boot] loading: Zapada.Fs.Fat32\n");
             if (Zapada.Fs.Fat32.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] FAT32 Initialize failed\n");
+                Console.Write("[Boot] FAT32 Initialize failed\n");
             }
 
             /* ------------------------------------------------------------ */
             /* Step D.4: initialize managed VFS layer.                      */
             /* ------------------------------------------------------------ */
 
-            System.Console.Write("[Boot] loading: Zapada.Fs.Vfs\n");
+            Console.Write("[Boot] loading: Zapada.Fs.Vfs\n");
             if (Zapada.Fs.Vfs.DllMain.Initialize() == 0)
             {
-                System.Console.Write("[Boot] VFS Initialize failed\n");
+                Console.Write("[Boot] VFS Initialize failed\n");
             }
 
             /* ============================================================== */
             /* Phase 3: Persistent storage discovery (NON-FATAL)              */
             /* ============================================================== */
 
-            System.Console.Write("[Boot] Persistent storage: scanning...\n");
+            Console.Write("[Boot] Persistent storage: scanning...\n");
 
             int startLba = Gpt.FindZapadaBootPartition();
             if (startLba < 0)
             {
-                System.Console.Write("[Boot] ZAPADA_BOOT not found (non-fatal)\n");
+                Console.Write("[Boot] ZAPADA_BOOT not found (non-fatal)\n");
             }
             else
             {
-                System.Console.Write("[Boot] ZAPADA_BOOT at LBA ");
-                Zapada.Console.WriteInt(startLba);
-                System.Console.Write("\n");
+                Console.Write("[Boot] ZAPADA_BOOT at LBA ");
+                Console.Write(startLba);
+                Console.Write("\n");
 
                 VirtioPartitionView partition = new VirtioPartitionView();
                 partition.Initialize(startLba, 65536, 2);
@@ -165,34 +165,34 @@ namespace Zapada.Boot
                 VolumeProbe? bestProbe = DriverRegistry.FindBestProbe(partition);
                 if (bestProbe == null)
                 {
-                    System.Console.Write("[Boot] No filesystem probe matched (non-fatal)\n");
+                    Console.Write("[Boot] No filesystem probe matched (non-fatal)\n");
                 }
                 else
                 {
-                    System.Console.Write("[Boot] Probe matched: ");
-                    System.Console.Write(bestProbe.GetDriverKey());
-                    System.Console.Write("\n");
+                    Console.Write("[Boot] Probe matched: ");
+                    Console.Write(bestProbe.GetDriverKey());
+                    Console.Write("\n");
 
                     MountedVolume? mountedVolume = bestProbe.Mount(partition);
                     if (mountedVolume == null)
                     {
-                        System.Console.Write("[Boot] Probe mount failed (non-fatal)\n");
+                        Console.Write("[Boot] Probe mount failed (non-fatal)\n");
                     }
                     else
                     {
                         int mountRc = Vfs.Mount("/boot", mountedVolume);
                         if (mountRc < 0)
                         {
-                            System.Console.Write("[Boot] VFS mount /boot failed\n");
+                            Console.Write("[Boot] VFS mount /boot failed\n");
                         }
                         else
                         {
-                            System.Console.Write("[Boot] FAT32 mounted at /boot\n");
+                            Console.Write("[Boot] FAT32 mounted at /boot\n");
 
                             int listRc = Vfs.List("/boot");
                             if (listRc < 0)
                             {
-                                System.Console.Write("[Boot] FAT32 VFS list failed\n");
+                                Console.Write("[Boot] FAT32 VFS list failed\n");
                             }
 
                             int fd = Vfs.Open("/boot/TEST.DLL");
@@ -204,17 +204,17 @@ namespace Zapada.Boot
 
                                 if (nr == 2 && hdr[0] == 0x4D && hdr[1] == 0x5A)
                                 {
-                                    System.Console.Write("[Boot] FAT32 VFS read OK: MZ verified\n");
-                                    System.Console.Write("[Gate] Phase-Fat32Driver\n");
+                                    Console.Write("[Boot] FAT32 VFS read OK: MZ verified\n");
+                                    Console.Write("[Gate] Phase-Fat32Driver\n");
                                 }
                                 else
                                 {
-                                    System.Console.Write("[Boot] FAT32 VFS read: MZ mismatch\n");
+                                    Console.Write("[Boot] FAT32 VFS read: MZ mismatch\n");
                                 }
                             }
                             else
                             {
-                                System.Console.Write("[Boot] FAT32 VFS open failed\n");
+                                Console.Write("[Boot] FAT32 VFS open failed\n");
                             }
                         }
                     }
@@ -222,7 +222,7 @@ namespace Zapada.Boot
             }
 
             /* Gate D: boot sequence complete. */
-            System.Console.Write("[Gate] GateD\n");
+            Console.Write("[Gate] GateD\n");
         }
     }
 }
