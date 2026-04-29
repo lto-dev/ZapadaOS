@@ -173,11 +173,6 @@ ipc_handle_t ipc_channel_create(void)
             s_channels[i].blocked_sender   = NULL;
             s_channels[i].blocked_receiver = NULL;
 
-            console_write("IPC             : channel created handle=");
-            console_write_dec((uint64_t)h);
-            console_write(" slot=");
-            console_write_dec((uint64_t)i);
-            console_write("\n");
             return h;
         }
     }
@@ -215,9 +210,6 @@ ipc_result_t ipc_channel_destroy(ipc_handle_t h)
     ch->blocked_sender   = NULL;
     ch->blocked_receiver = NULL;
 
-    console_write("IPC             : channel destroyed handle=");
-    console_write_dec((uint64_t)h);
-    console_write("\n");
     return IPC_OK;
 }
 

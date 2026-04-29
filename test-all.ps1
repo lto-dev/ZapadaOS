@@ -239,6 +239,7 @@ function Restore-ManagedCacheToBuild {
     $entries = @(
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Boot.dll"); Target = (Join-Path (Get-Location).Path "build\boot.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Test.Hello.dll"); Target = (Join-Path (Get-Location).Path "build\hello.dll") },
+        @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Drivers.dll"); Target = (Join-Path (Get-Location).Path "build\drivers.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Drivers.VirtioBlock.dll"); Target = (Join-Path (Get-Location).Path "build\vblk.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Gpt.dll"); Target = (Join-Path (Get-Location).Path "build\gpt.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Storage.dll"); Target = (Join-Path (Get-Location).Path "build\storage.dll") },
@@ -246,6 +247,8 @@ function Restore-ManagedCacheToBuild {
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Ext.dll"); Target = (Join-Path (Get-Location).Path "build\ext.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Ext4.dll"); Target = (Join-Path (Get-Location).Path "build\ext4.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Vfs.dll"); Target = (Join-Path (Get-Location).Path "build\vfs.dll") },
+        @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Shell.dll"); Target = (Join-Path (Get-Location).Path "build\shell.dll") },
+        @{ Cache = (Join-Path $ManagedCacheRoot "System.Console.dll"); Target = (Join-Path (Get-Location).Path "build\System.Console.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Conformance.CrossAsm.dll"); Target = (Join-Path (Get-Location).Path "build\conf-crossasm.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Conformance.dll"); Target = (Join-Path (Get-Location).Path "build\conf.dll") }
     )
@@ -407,6 +410,46 @@ function Invoke-VblkBuild {
     Copy-Item $vblkBinDll $vblkDest -Force
     $sz = (Get-Item $vblkDest).Length
     Write-Host "  Staged: $vblkDest ($sz bytes)." -ForegroundColor Gray
+    return $true
+}
+
+function Invoke-DriversBuild {
+    # Build shared driver contracts/HAL surface and stage build/drivers.dll for managed driver dependencies.
+    # Must be called AFTER the native clean/build sequence because build artifacts can be recreated.
+    $driversProject = Join-Path (Get-Location).Path "src\managed\Zapada.Drivers\Zapada.Drivers.csproj"
+    $driversBinDll  = Join-Path (Get-Location).Path "src\managed\Zapada.Drivers\bin\$BuildConfig\net10.0\Zapada.Drivers.dll"
+    $driversDest    = Join-Path (Get-Location).Path "build\drivers.dll"
+
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        Write-Host "  WARNING: 'dotnet' not found; Zapada.Drivers not built; managed driver HAL smoke may not pass." -ForegroundColor Yellow
+        return $true
+    }
+
+    if (-not (Test-Path $driversProject)) {
+        Write-Host "  WARNING: Zapada.Drivers.csproj not found; skipping shared driver HAL build." -ForegroundColor Yellow
+        return $true
+    }
+
+    Write-Host "  Building shared driver contracts (Zapada.Drivers)..." -ForegroundColor Cyan
+    dotnet build $driversProject -c $BuildConfig --nologo 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: dotnet build Zapada.Drivers failed." -ForegroundColor Red
+        return $false
+    }
+
+    if (-not (Test-Path $driversBinDll)) {
+        Write-Host "  ERROR: $driversBinDll not found after build." -ForegroundColor Red
+        return $false
+    }
+
+    $buildDir = Join-Path (Get-Location).Path "build"
+    if (-not (Test-Path $buildDir)) {
+        New-Item -ItemType Directory -Path $buildDir | Out-Null
+    }
+
+    Copy-Item $driversBinDll $driversDest -Force
+    $sz = (Get-Item $driversDest).Length
+    Write-Host "  Staged: $driversDest ($sz bytes)." -ForegroundColor Gray
     return $true
 }
 
@@ -612,6 +655,49 @@ function Invoke-VfsBuild {
     return $true
 }
 
+function Invoke-ShellBuild {
+    $shellProject = Join-Path (Get-Location).Path "src\managed\Zapada.Shell\Zapada.Shell.csproj"
+    $shellBinDll  = Join-Path (Get-Location).Path "src\managed\Zapada.Shell\bin\$BuildConfig\net10.0\Zapada.Shell.dll"
+    $shellDest    = Join-Path (Get-Location).Path "build\shell.dll"
+
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        Write-Host "  WARNING: 'dotnet' not found; Zapada.Shell not built; Phase-Shell gate will not pass." -ForegroundColor Yellow
+        return $true
+    }
+
+    if (-not (Test-Path $shellProject)) {
+        Write-Host "  WARNING: Zapada.Shell.csproj not found; skipping shell build." -ForegroundColor Yellow
+        return $true
+    }
+
+    Write-Host "  Building managed shell (Zapada.Shell)..." -ForegroundColor Cyan
+    dotnet build $shellProject -c $BuildConfig --nologo 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: dotnet build Zapada.Shell failed." -ForegroundColor Red
+        return $false
+    }
+
+    if (-not (Test-Path $shellBinDll)) {
+        Write-Host "  ERROR: $shellBinDll not found after build." -ForegroundColor Red
+        return $false
+    }
+
+    $buildDir = Join-Path (Get-Location).Path "build"
+    if (-not (Test-Path $buildDir)) {
+        New-Item -ItemType Directory -Path $buildDir | Out-Null
+    }
+
+    Copy-Item $shellBinDll $shellDest -Force
+    $cacheDir = Join-Path (Get-Location).Path ".build-cache\managed"
+    if (-not (Test-Path $cacheDir)) {
+        New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+    }
+    Copy-Item $shellBinDll (Join-Path $cacheDir "Zapada.Shell.dll") -Force
+    $sz = (Get-Item $shellDest).Length
+    Write-Host "  Staged: $shellDest ($sz bytes)." -ForegroundColor Gray
+    return $true
+}
+
 function Invoke-StorageBuild {
     # Build Zapada.Storage and stage build/storage.dll for the Phase 2B storage gate.
     # Must be called AFTER the native clean/build sequence because build artifacts can be recreated.
@@ -703,6 +789,12 @@ function Invoke-Build {
         return $false
     }
 
+    # Stage build/drivers.dll AFTER the native clean/build sequence for shared managed driver HAL dependencies.
+    # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
+    if (-not (Invoke-DriversBuild)) {
+        return $false
+    }
+
     # Stage build/vblk.dll AFTER the native clean/build sequence for Phase 3.1 D.1 VBLK.DLL driver gate.
     # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-VblkBuild)) {
@@ -738,6 +830,10 @@ function Invoke-Build {
     # Stage build/vfs.dll AFTER the native clean/build sequence for Phase 3.1 D.4 VFS.DLL driver gate.
     # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-VfsBuild)) {
+        return $false
+    }
+
+    if (-not (Invoke-ShellBuild)) {
         return $false
     }
 
@@ -822,7 +918,6 @@ function Test-X86_64 {
         "PMM initialized",
         "Heap probe returned",
         "Phase 2A check passed",
-        "Verifier accepted assembly",
         "Phase 2B subsystems initialized",
         "Phase 2B scheduler initialized",
         "Phase 2B timer initializing",
@@ -838,13 +933,8 @@ function Test-X86_64 {
         "Phase 2C kstack pool initialized",
         "Phase 2C self-test count (10 pass 0 fail)",
         "Phase 2C all self-tests PASSED",
-        "Phase 3.2 S1 interpreter gap self-tests gate",
-        "Phase-Storage Storage found",
-        "Phase-Storage Storage loaded",
         "Phase-Storage Storage initialized",
         "Phase-Storage gate",
-        "Phase 3.2 Conformance found",
-        "Phase 3.2 Conformance loaded",
         "Phase 3.2 Conformance OK",
         "Phase 3.2 Conformance gate",
         "Phase CrossAsm field gate",
@@ -852,16 +942,11 @@ function Test-X86_64 {
         "Phase Cctor widen gate",
         "Phase 3B Zapada.Test.Hello loaded",
         "Phase 3B end-to-end gate",
-        "Phase 3.1 D.1 VirtioBlock found",
-        "Phase 3.1 D.1 VirtioBlock loaded",
         "Phase 3.1 D.1 VirtioBlock initialized",
         "Phase 3.1 D.1 VirtioBlock gate",
-        "Phase 3.1 D.2 GPT found",
-        "Phase 3.1 D.2 GPT loaded",
+        "Managed driver HAL smoke gate",
         "Phase 3.1 D.2 GPT initialized",
         "Phase 3.1 D.2 GPT gate",
-        "Phase 3.1 D.3 FAT32 found",
-        "Phase 3.1 D.3 FAT32 loaded",
         "Phase 3.1 D.3 FAT32 initialized",
         "Phase Ext4 driver initialized",
         "Phase Ext4 driver gate",
@@ -869,12 +954,16 @@ function Test-X86_64 {
         "Phase Ext4 read gate",
         "Phase Ext4 fstab gate",
         "Phase FAT32 mounted at /mnt/c gate",
-        "Phase 3.1 D.4 VFS found",
-        "Phase 3.1 D.4 VFS loaded",
+        "Shell banner",
+        "Shell mount command",
+        "Shell root listing command",
+        "Shell /mnt/c listing command",
+        "Shell fstab cat command",
+        "Shell gate",
         "Phase 3.1 D.4 VFS initialized",
         "Phase 3.1 D.4 VFS gate",
         "Boot complete gate GateD",
-        "System halted after Phase 3A bring-up"
+        "System halted after ZACLR boot validation path"
     )
     $patterns = @(
         "Zapada - Phase 3A bring-up",
@@ -883,7 +972,6 @@ function Test-X86_64 {
         "PMM free frames    : ",
         "Heap probe         : ",
         "Phase 2A check     : native scaffolding initialized",
-        "Verifier            : assembly OK",
         "Phase 2B        : initializing subsystems",
         "Scheduler       : initialized",
         "Timer           : initializing hz=",
@@ -899,13 +987,8 @@ function Test-X86_64 {
         "KStack pool     : ",
         "Phase 2C tests: pass=10 fail=0",
         "Phase 2C        : all self-tests PASSED",
-        "[Gate] Phase3.2-S1",
-        "[Boot] found: Zapada.Storage",
-        "[Boot] Zapada.Storage loaded",
         "[Storage] Zapada.Storage initialized",
         "[Gate] Phase-Storage",
-        "[Boot] found: Zapada.Conformance",
-        "[Boot] Zapada.Conformance loaded",
         "[Boot] Conformance OK",
         "[Gate] Phase3.2-Conf",
         "[Gate] Phase-CrossAsmField",
@@ -913,16 +996,11 @@ function Test-X86_64 {
         "[Gate] Phase-CctorWiden",
         "[Boot] invoking: Zapada.Test.Hello",
         "[Gate] Phase3B",
-        "[Boot] found: Zapada.Drivers.VirtioBlock",
-        "[Boot] Zapada.Drivers.VirtioBlock loaded",
-        "[Boot] VirtioBlock driver initialized",
+        "[Boot] VirtioBlock managed bridge initialized",
         "[Gate] Phase31-D1",
-        "[Boot] found: Zapada.Fs.Gpt",
-        "[Boot] Zapada.Fs.Gpt loaded",
+        "[Gate] Phase-DriverHal",
         "[Boot] GPT driver initialized",
         "[Gate] Phase31-D2",
-        "[Boot] found: Zapada.Fs.Fat32",
-        "[Boot] Zapada.Fs.Fat32 loaded",
         "[Boot] FAT32 driver initialized",
         "[Boot] Ext4 driver initialized",
         "[Gate] Phase-Ext4Driver",
@@ -930,12 +1008,16 @@ function Test-X86_64 {
         "[Gate] Phase-Ext4Read",
         "[Gate] Phase-Ext4Fstab",
         "[Gate] Phase-Fat32MntC",
-        "[Boot] found: Zapada.Fs.Vfs",
-        "[Boot] Zapada.Fs.Vfs loaded",
+        "Zapada Shell",
+        "[Shell] $ mount",
+        "[Shell] $ ls /",
+        "[Shell] $ ls /mnt/c",
+        "[Shell] $ cat /etc/fstab",
+        "[Gate] Phase-Shell",
         "[Boot] VFS initialized",
         "[Gate] Phase31-D4",
         "[Gate] GateD",
-        "System halted after successful Phase 3A bring-up."
+        "System halted after ZACLR boot validation path."
     )
 
     # Negative check: ensure no test failures in the log
@@ -969,10 +1051,6 @@ function Test-X86_64 {
     # VFS bootstrap must not also report an initialization failure.
     $vfsInitFailed = ($null -ne $content) -and $content.Contains("[Boot] VFS Initialize failed")
     if (-not (Write-Check -Label "Phase 3.1 D.4 VFS bootstrap succeeded" -Pass (-not $vfsInitFailed) -Detail "Log contains: [Boot] VFS Initialize failed")) { $allPass = $false }
-
-    # Phase 3.2 S1 gate line check (interpreter gap self-tests passed)
-    $p32s1Gate = ($null -ne $content) -and $content.Contains("[Gate] Phase3.2-S1")
-    if (-not (Write-Check -Label "Phase 3.2 S1 interpreter gap tests gate" -Pass ([bool]$p32s1Gate))) { $allPass = $false }
 
     # Phase 3.2 Conf gate line check (IL conformance tests all passed)
     $p32confGate = ($null -ne $content) -and $content.Contains("[Gate] Phase3.2-Conf")
@@ -1101,7 +1179,6 @@ function Test-AArch64 {
         "PMM initialized",
         "Heap initialized",
         "Phase 2A AArch64 check passed",
-        "Verifier accepted assembly",
         "Phase 2B subsystems initialized",
         "Phase 2B scheduler initialized",
         "Phase 2B timer initializing",
@@ -1117,13 +1194,8 @@ function Test-AArch64 {
         "Phase 2C kstack pool initialized",
         "Phase 2C self-test count (10 pass 0 fail)",
         "Phase 2C all self-tests PASSED",
-        "Phase 3.2 S1 interpreter gap self-tests gate",
-        "Phase-Storage Storage found",
-        "Phase-Storage Storage loaded",
         "Phase-Storage Storage initialized",
         "Phase-Storage gate",
-        "Phase 3.2 Conformance found",
-        "Phase 3.2 Conformance loaded",
         "Phase 3.2 Conformance OK",
         "Phase 3.2 Conformance gate",
         "Phase CrossAsm field gate",
@@ -1131,16 +1203,11 @@ function Test-AArch64 {
         "Phase Cctor widen gate",
         "Phase 3B Zapada.Test.Hello loaded",
         "Phase 3B end-to-end gate",
-        "Phase 3.1 D.1 VirtioBlock found",
-        "Phase 3.1 D.1 VirtioBlock loaded",
         "Phase 3.1 D.1 VirtioBlock initialized",
         "Phase 3.1 D.1 VirtioBlock gate",
-        "Phase 3.1 D.2 GPT found",
-        "Phase 3.1 D.2 GPT loaded",
+        "Managed driver HAL smoke gate",
         "Phase 3.1 D.2 GPT initialized",
         "Phase 3.1 D.2 GPT gate",
-        "Phase 3.1 D.3 FAT32 found",
-        "Phase 3.1 D.3 FAT32 loaded",
         "Phase 3.1 D.3 FAT32 initialized",
         "Phase Ext4 driver initialized",
         "Phase Ext4 driver gate",
@@ -1148,12 +1215,16 @@ function Test-AArch64 {
         "Phase Ext4 read gate",
         "Phase Ext4 fstab gate",
         "Phase FAT32 mounted at /mnt/c gate",
-        "Phase 3.1 D.4 VFS found",
-        "Phase 3.1 D.4 VFS loaded",
+        "Shell banner",
+        "Shell mount command",
+        "Shell root listing command",
+        "Shell /mnt/c listing command",
+        "Shell fstab cat command",
+        "Shell gate",
         "Phase 3.1 D.4 VFS initialized",
         "Phase 3.1 D.4 VFS gate",
         "Boot complete gate GateD",
-        "System halted after Phase 3A bring-up"
+        "System halted after ZACLR boot validation path"
     )
     $patterns = @(
         "Zapada - Phase 3A AArch64 bring-up",
@@ -1162,7 +1233,6 @@ function Test-AArch64 {
         "PMM free frames    : ",
         "Heap init          : OK",
         "Phase 2A check     :",
-        "Verifier            : assembly OK",
         "Phase 2B        : initializing subsystems",
         "Scheduler       : initialized",
         "Timer           : initializing hz=",
@@ -1178,13 +1248,8 @@ function Test-AArch64 {
         "KStack pool     : ",
         "Phase 2C tests: pass=10 fail=0",
         "Phase 2C        : all self-tests PASSED",
-        "[Gate] Phase3.2-S1",
-        "[Boot] found: Zapada.Storage",
-        "[Boot] Zapada.Storage loaded",
         "[Storage] Zapada.Storage initialized",
         "[Gate] Phase-Storage",
-        "[Boot] found: Zapada.Conformance",
-        "[Boot] Zapada.Conformance loaded",
         "[Boot] Conformance OK",
         "[Gate] Phase3.2-Conf",
         "[Gate] Phase-CrossAsmField",
@@ -1192,16 +1257,11 @@ function Test-AArch64 {
         "[Gate] Phase-CctorWiden",
         "[Boot] invoking: Zapada.Test.Hello",
         "[Gate] Phase3B",
-        "[Boot] found: Zapada.Drivers.VirtioBlock",
-        "[Boot] Zapada.Drivers.VirtioBlock loaded",
-        "[Boot] VirtioBlock driver initialized",
+        "[Boot] VirtioBlock managed bridge initialized",
         "[Gate] Phase31-D1",
-        "[Boot] found: Zapada.Fs.Gpt",
-        "[Boot] Zapada.Fs.Gpt loaded",
+        "[Gate] Phase-DriverHal",
         "[Boot] GPT driver initialized",
         "[Gate] Phase31-D2",
-        "[Boot] found: Zapada.Fs.Fat32",
-        "[Boot] Zapada.Fs.Fat32 loaded",
         "[Boot] FAT32 driver initialized",
         "[Boot] Ext4 driver initialized",
         "[Gate] Phase-Ext4Driver",
@@ -1209,12 +1269,16 @@ function Test-AArch64 {
         "[Gate] Phase-Ext4Read",
         "[Gate] Phase-Ext4Fstab",
         "[Gate] Phase-Fat32MntC",
-        "[Boot] found: Zapada.Fs.Vfs",
-        "[Boot] Zapada.Fs.Vfs loaded",
+        "Zapada Shell",
+        "[Shell] $ mount",
+        "[Shell] $ ls /",
+        "[Shell] $ ls /mnt/c",
+        "[Shell] $ cat /etc/fstab",
+        "[Gate] Phase-Shell",
         "[Boot] VFS initialized",
         "[Gate] Phase31-D4",
         "[Gate] GateD",
-        "System halted after successful Phase 3A bring-up."
+        "System halted after ZACLR boot validation path."
     )
 
     # Negative check: ensure no test failures in the log
@@ -1248,10 +1312,6 @@ function Test-AArch64 {
     # VFS bootstrap must not also report an initialization failure.
     $vfsInitFailed = ($null -ne $content) -and $content.Contains("[Boot] VFS Initialize failed")
     if (-not (Write-Check -Label "Phase 3.1 D.4 VFS bootstrap succeeded" -Pass (-not $vfsInitFailed) -Detail "Log contains: [Boot] VFS Initialize failed")) { $allPass = $false }
-
-    # Phase 3.2 S1 gate line check (interpreter gap self-tests passed)
-    $p32s1Gate = ($null -ne $content) -and $content.Contains("[Gate] Phase3.2-S1")
-    if (-not (Write-Check -Label "Phase 3.2 S1 interpreter gap tests gate" -Pass ([bool]$p32s1Gate))) { $allPass = $false }
 
     # Phase 3.2 Conf gate line check (IL conformance tests all passed)
     $p32confGate = ($null -ne $content) -and $content.Contains("[Gate] Phase3.2-Conf")

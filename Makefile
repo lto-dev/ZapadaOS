@@ -445,6 +445,7 @@ C_SOURCES := \
     $(SRC_DIR)/kernel/arch/x86_64/console.c         \
     $(SRC_DIR)/kernel/arch/x86_64/pic.c             \
     $(SRC_DIR)/kernel/arch/x86_64/pit.c             \
+    $(SRC_DIR)/kernel/arch/x86_64/paging.c          \
     $(SRC_DIR)/kernel/mm/pmm.c                      \
     $(SRC_DIR)/kernel/mm/heap.c                     \
     $(SRC_DIR)/kernel/process/process.c             \
@@ -716,6 +717,8 @@ $(INITRAMFS_IMG): | $(BUILD_DIR)
 	elif [ -f $(SRC_DIR)/managed/Zapada.Boot/bin/Release/net10.0/Zapada.Boot.dll ]; then cp $(SRC_DIR)/managed/Zapada.Boot/bin/Release/net10.0/Zapada.Boot.dll $(BUILD_DIR)/initramfs_root/Zapada.Boot.dll; fi
 	@if [ -f $(BUILD_DIR)/hello.dll ]; then cp $(BUILD_DIR)/hello.dll $(BUILD_DIR)/initramfs_root/Zapada.Test.Hello.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Test.Hello/bin/Release/net10.0/Zapada.Test.Hello.dll ]; then cp $(SRC_DIR)/managed/Zapada.Test.Hello/bin/Release/net10.0/Zapada.Test.Hello.dll $(BUILD_DIR)/initramfs_root/Zapada.Test.Hello.dll; fi
+	@if [ -f $(BUILD_DIR)/drivers.dll ]; then cp $(BUILD_DIR)/drivers.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.dll; \
+	elif [ -f $(SRC_DIR)/managed/Zapada.Drivers/bin/Release/net10.0/Zapada.Drivers.dll ]; then cp $(SRC_DIR)/managed/Zapada.Drivers/bin/Release/net10.0/Zapada.Drivers.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.dll; fi
 	@if [ -f $(BUILD_DIR)/vblk.dll ]; then cp $(BUILD_DIR)/vblk.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.VirtioBlock.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Drivers.VirtioBlock/bin/Release/net10.0/Zapada.Drivers.VirtioBlock.dll ]; then cp $(SRC_DIR)/managed/Zapada.Drivers.VirtioBlock/bin/Release/net10.0/Zapada.Drivers.VirtioBlock.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.VirtioBlock.dll; fi
 	@if [ -f $(BUILD_DIR)/gpt.dll ]; then cp $(BUILD_DIR)/gpt.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Gpt.dll; \
@@ -730,6 +733,8 @@ $(INITRAMFS_IMG): | $(BUILD_DIR)
 	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Ext4/bin/Release/net10.0/Zapada.Fs.Ext4.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Ext4/bin/Release/net10.0/Zapada.Fs.Ext4.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Ext4.dll; fi
 	@if [ -f $(BUILD_DIR)/vfs.dll ]; then cp $(BUILD_DIR)/vfs.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Vfs.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Vfs/bin/Release/net10.0/Zapada.Fs.Vfs.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Vfs/bin/Release/net10.0/Zapada.Fs.Vfs.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Vfs.dll; fi
+	@if [ -f $(BUILD_DIR)/shell.dll ]; then cp $(BUILD_DIR)/shell.dll $(BUILD_DIR)/initramfs_root/Zapada.Shell.dll; \
+	elif [ -f $(SRC_DIR)/managed/Zapada.Shell/bin/Release/net10.0/Zapada.Shell.dll ]; then cp $(SRC_DIR)/managed/Zapada.Shell/bin/Release/net10.0/Zapada.Shell.dll $(BUILD_DIR)/initramfs_root/Zapada.Shell.dll; fi
 	@if [ -f $(BUILD_DIR)/conf-crossasm.dll ]; then cp $(BUILD_DIR)/conf-crossasm.dll $(BUILD_DIR)/initramfs_root/Zapada.Conformance.CrossAsm.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Conformance.CrossAsm/bin/Release/net10.0/Zapada.Conformance.CrossAsm.dll ]; then cp $(SRC_DIR)/managed/Zapada.Conformance.CrossAsm/bin/Release/net10.0/Zapada.Conformance.CrossAsm.dll $(BUILD_DIR)/initramfs_root/Zapada.Conformance.CrossAsm.dll; fi
 	@if [ -f $(BUILD_DIR)/conf.dll ]; then cp $(BUILD_DIR)/conf.dll $(BUILD_DIR)/initramfs_root/Zapada.Conformance.dll; \

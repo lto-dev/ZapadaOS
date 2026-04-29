@@ -103,6 +103,29 @@ void uart_putc(char c)
     uart_reg_write(UART_DR, (uint32_t)(unsigned char)c);
 }
 
+bool uart_can_read(void)
+{
+    return (uart_reg_read(UART_FR) & FR_RXFE) == 0;
+}
+
+int uart_try_read_char(void)
+{
+    if (!uart_can_read()) {
+        return -1;
+    }
+
+    return (int)(uart_reg_read(UART_DR) & 0xFFu);
+}
+
+int uart_read_char(void)
+{
+    while (!uart_can_read()) {
+        /* Busy-wait. */
+    }
+
+    return (int)(uart_reg_read(UART_DR) & 0xFFu);
+}
+
 void uart_write(const char *str)
 {
     while (*str != '\0') {

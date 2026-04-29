@@ -26,6 +26,9 @@
  * uart_write       - transmit a null-terminated string; LF -> CRLF.
  * uart_write_hex64 - transmit a 64-bit value as "0x<16 hex digits>".
  * uart_write_dec   - transmit a 64-bit value as unsigned decimal.
+ * uart_can_read    - return true when an RX byte is ready.
+ * uart_try_read_char - read one byte, or -1 when none is ready.
+ * uart_read_char   - block until one RX byte is available.
  */
 
 void   uart_init(void);
@@ -33,6 +36,9 @@ void   uart_putc(char c);
 void   uart_write(const char *str);
 void   uart_write_hex64(uint64_t val);
 void   uart_write_dec(uint64_t val);
+bool   uart_can_read(void);
+int    uart_try_read_char(void);
+int    uart_read_char(void);
 
 #endif /* ZAPADA_ARCH_AARCH64_UART_H */
 

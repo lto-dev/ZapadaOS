@@ -44,7 +44,10 @@ extern "C" void zaclr_trace_emit(const struct zaclr_runtime* runtime, const stru
     }
 
     if (record->event_id == ZACLR_TRACE_EVENT_CALL_TARGET
+        || record->event_id == ZACLR_TRACE_EVENT_METHOD_ENTER
+        || record->event_id == ZACLR_TRACE_EVENT_METHOD_RETURN
         || record->event_id == ZACLR_TRACE_EVENT_METHOD_RVA
+        || record->event_id == ZACLR_TRACE_EVENT_NATIVE_CALL
         || record->event_id == ZACLR_TRACE_EVENT_OPCODE_STEP
         || record->event_id == ZACLR_TRACE_EVENT_OPCODE_RAW
         || record->event_id == ZACLR_TRACE_EVENT_FRAME_PUSH

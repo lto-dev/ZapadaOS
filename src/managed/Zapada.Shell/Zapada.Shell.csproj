@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Zapada.Shell</AssemblyName>
+    <RootNamespace>Zapada.Shell</RootNamespace>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Zapada.Fs.Vfs/Zapada.Fs.Vfs.csproj" />
+    <ProjectReference Include="../Zapada.Storage/Zapada.Storage.csproj" />
+  </ItemGroup>
+</Project>

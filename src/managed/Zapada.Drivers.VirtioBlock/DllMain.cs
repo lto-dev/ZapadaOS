@@ -35,8 +35,15 @@ namespace Zapada.Drivers
          */
         public static int Initialize()
         {
-            Console.Write("[Boot] VirtioBlock driver initialized\n");
+            Console.Write("[Boot] VirtioBlock managed bridge initialized\n");
             Console.Write("[Gate] Phase31-D1\n");
+
+            if (VirtioBlockProbe.RunSmoke() == 0)
+            {
+                Console.Write("[Boot] VirtioBlock managed HAL smoke failed\n");
+                return 0;
+            }
+
             return 1;
         }
     }

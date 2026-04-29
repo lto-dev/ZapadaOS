@@ -16,6 +16,50 @@ namespace System
     public static class Console
     {
         [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern int Read();
+
+        public static string? ReadLine()
+        {
+            char[] chars = new char[256];
+            int count = 0;
+
+            while (count < chars.Length)
+            {
+                int ch = Read();
+                if (ch < 0)
+                {
+                    return count == 0 ? null : new string(chars, 0, count);
+                }
+
+                if (ch == 13 || ch == 10)
+                {
+                    Write("\n");
+                    return new string(chars, 0, count);
+                }
+
+                if (ch == 8 || ch == 127)
+                {
+                    if (count > 0)
+                    {
+                        count--;
+                        Write("\b \b");
+                    }
+
+                    continue;
+                }
+
+                if (ch >= 32 && ch <= 126)
+                {
+                    chars[count] = (char)ch;
+                    count++;
+                    Write((char)ch);
+                }
+            }
+
+            return new string(chars, 0, count);
+        }
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern void WriteLine();
 
         [MethodImpl(MethodImplOptions.InternalCall)]

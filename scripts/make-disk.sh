@@ -80,6 +80,12 @@ if [ ! -f "$VBLK_DLL" ] && [ -f "$VBLK_DLL_BIN" ]; then
     VBLK_DLL="$VBLK_DLL_BIN"
 fi
 
+DRIVERS_DLL="$WORKSPACE_DIR/build/drivers.dll"
+DRIVERS_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Drivers/bin/Release/net10.0/Zapada.Drivers.dll"
+if [ ! -f "$DRIVERS_DLL" ] && [ -f "$DRIVERS_DLL_BIN" ]; then
+    DRIVERS_DLL="$DRIVERS_DLL_BIN"
+fi
+
 GPT_DLL="$WORKSPACE_DIR/build/gpt.dll"
 GPT_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Fs.Gpt/bin/Release/net10.0/Zapada.Fs.Gpt.dll"
 if [ ! -f "$GPT_DLL" ] && [ -f "$GPT_DLL_BIN" ]; then
@@ -116,6 +122,12 @@ if [ ! -f "$VFS_DLL" ] && [ -f "$VFS_DLL_BIN" ]; then
     VFS_DLL="$VFS_DLL_BIN"
 fi
 
+SHELL_DLL="$WORKSPACE_DIR/build/shell.dll"
+SHELL_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Shell/bin/Release/net10.0/Zapada.Shell.dll"
+if [ ! -f "$SHELL_DLL" ] && [ -f "$SHELL_DLL_BIN" ]; then
+    SHELL_DLL="$SHELL_DLL_BIN"
+fi
+
 BOOT_DLL="$WORKSPACE_DIR/build/boot.dll"
 BOOT_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Boot/bin/Release/net10.0/Zapada.Boot.dll"
 if [ ! -f "$BOOT_DLL" ] && [ -f "$BOOT_DLL_BIN" ]; then
@@ -144,8 +156,9 @@ echo "  Formatting ZAPADA_BOOT as ext4 with Linux-style root files..."
 TMP_EXT4_IMG="$(mktemp)"
 TMP_DUMMY_FILE="$(mktemp)"
 TMP_FSTAB_FILE="$(mktemp)"
+TMP_MOTD_FILE="$(mktemp)"
 cleanup() {
-    rm -f "$TMP_EXT4_IMG" "$TMP_DUMMY_FILE" "$TMP_FSTAB_FILE"
+    rm -f "$TMP_EXT4_IMG" "$TMP_DUMMY_FILE" "$TMP_FSTAB_FILE" "$TMP_MOTD_FILE"
 }
 trap cleanup EXIT
 dd if=/dev/zero of="$TMP_EXT4_IMG" bs=512 count="$ROOT_PART_SECTORS" status=none
@@ -157,11 +170,17 @@ cat > "$TMP_FSTAB_FILE" <<'FSTAB'
 LABEL=ZAPADA_BOOT /           ext4    ro
 LABEL=ZAPADA_DATA /mnt/c      vfat    ro
 FSTAB
+cat > "$TMP_MOTD_FILE" <<'MOTD'
+Welcome to Zapada.
+Ext4 is mounted as /, and FAT32 compatibility is mounted at /mnt/c.
+Type help for shell commands.
+MOTD
 debugfs -w -R "mkdir /etc" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt/c" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "write $TMP_DUMMY_FILE /dummy.txt" "$TMP_EXT4_IMG" > /dev/null 2>&1
 debugfs -w -R "write $TMP_FSTAB_FILE /etc/fstab" "$TMP_EXT4_IMG" > /dev/null 2>&1
+debugfs -w -R "write $TMP_MOTD_FILE /etc/motd" "$TMP_EXT4_IMG" > /dev/null 2>&1
 
 write_ext4_payload() {
     local source_path="$1"
@@ -178,6 +197,7 @@ write_ext4_payload() {
 echo "  Adding managed payloads to ZAPADA_BOOT Ext4 root partition..."
 write_ext4_payload "$BOOT_DLL" "/Zapada.Boot.dll" "Zapada.Boot.dll"
 write_ext4_payload "$HELLO_DLL" "/Zapada.Test.Hello.dll" "Zapada.Test.Hello.dll"
+write_ext4_payload "$DRIVERS_DLL" "/Zapada.Drivers.dll" "Zapada.Drivers.dll"
 write_ext4_payload "$VBLK_DLL" "/Zapada.Drivers.VirtioBlock.dll" "Zapada.Drivers.VirtioBlock.dll"
 write_ext4_payload "$GPT_DLL" "/Zapada.Fs.Gpt.dll" "Zapada.Fs.Gpt.dll"
 write_ext4_payload "$FAT32_DLL" "/Zapada.Fs.Fat32.dll" "Zapada.Fs.Fat32.dll"
@@ -185,6 +205,7 @@ write_ext4_payload "$EXT_DLL" "/Zapada.Fs.Ext.dll" "Zapada.Fs.Ext.dll"
 write_ext4_payload "$EXT4_DLL" "/Zapada.Fs.Ext4.dll" "Zapada.Fs.Ext4.dll"
 write_ext4_payload "$STORAGE_DLL" "/Zapada.Storage.dll" "Zapada.Storage.dll"
 write_ext4_payload "$VFS_DLL" "/Zapada.Fs.Vfs.dll" "Zapada.Fs.Vfs.dll"
+write_ext4_payload "$SHELL_DLL" "/Zapada.Shell.dll" "Zapada.Shell.dll"
 write_ext4_payload "$CONSOLE_DLL" "/System.Console.dll" "System.Console.dll"
 write_ext4_payload "$CONF_DLL" "/Zapada.Conformance.dll" "Zapada.Conformance.dll"
 write_ext4_payload "$CROSSASM_DLL" "/Zapada.Conformance.CrossAsm.dll" "Zapada.Conformance.CrossAsm.dll"
@@ -217,6 +238,18 @@ else
     echo "  WARNING: mtools not found; TEST.DLL not written to ZAPADA_DATA."
     echo "  Phase 3A Part 3 gate check [Gate] GateD will not pass until mtools is installed."
     echo "  Install mtools: sudo apt install mtools"
+fi
+
+echo "  Adding DRIVERS.DLL to ZAPADA_DATA partition..."
+if command -v mcopy > /dev/null 2>&1; then
+    if [ -f "$DRIVERS_DLL" ]; then
+        MTOOLS_SKIP_CHECK=1 mcopy -i "${DISK_IMG}@@${DATA_PART_OFFSET}" "$DRIVERS_DLL" "::DRIVERS.DLL"
+        echo "  DRIVERS.DLL written from $(basename "$DRIVERS_DLL") (shared driver HAL payload)"
+    else
+        echo "  WARNING: DRIVERS.DLL not found; managed driver HAL dependencies may not load from /mnt/c."
+    fi
+else
+    echo "  WARNING: mtools not found; DRIVERS.DLL not written to ZAPADA_DATA."
 fi
 
 # Add VBLK.DLL to ZAPADA_DATA compatibility partition.
@@ -333,6 +366,19 @@ if command -v mcopy > /dev/null 2>&1; then
     fi
 else
     echo "  WARNING: mtools not found; VFS.DLL not written to ZAPADA_DATA."
+fi
+
+echo "  Adding SHELL.DLL to ZAPADA_DATA partition..."
+if command -v mcopy > /dev/null 2>&1; then
+    if [ -f "$SHELL_DLL" ]; then
+        MTOOLS_SKIP_CHECK=1 mcopy -i "${DISK_IMG}@@${DATA_PART_OFFSET}" "$SHELL_DLL" "::SHELL.DLL"
+        echo "  SHELL.DLL written from $(basename "$SHELL_DLL") (Zapada.Shell payload)"
+    else
+        echo "  WARNING: SHELL.DLL not found; Zapada.Shell payload will be absent."
+        echo "  Run: dotnet publish src/managed/Zapada.Shell/..."
+    fi
+else
+    echo "  WARNING: mtools not found; SHELL.DLL not written to ZAPADA_DATA."
 fi
 
 # Add CONF.DLL to ZAPADA_DATA compatibility partition.

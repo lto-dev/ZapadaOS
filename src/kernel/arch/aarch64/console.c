@@ -25,3 +25,18 @@ void console_write_dec(uint64_t val)
     uart_write_dec(val);
 }
 
+bool console_can_read(void)
+{
+    return uart_can_read();
+}
+
+int console_try_read_char(void)
+{
+    return uart_try_read_char();
+}
+
+int console_read_char(void)
+{
+    return uart_read_char();
+}
+

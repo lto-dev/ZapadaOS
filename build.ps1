@@ -245,6 +245,7 @@ function Restore-ManagedCacheToBuild {
     $cacheFiles = @(
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Boot.dll"); Target = (Join-Path (Get-Location).Path "build\boot.dll"); Required = $true },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Test.Hello.dll"); Target = (Join-Path (Get-Location).Path "build\hello.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "Zapada.Drivers.dll"); Target = (Join-Path (Get-Location).Path "build\drivers.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Drivers.VirtioBlock.dll"); Target = (Join-Path (Get-Location).Path "build\vblk.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Gpt.dll"); Target = (Join-Path (Get-Location).Path "build\gpt.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Fat32.dll"); Target = (Join-Path (Get-Location).Path "build\fat32.dll"); Required = $false },
@@ -252,6 +253,8 @@ function Restore-ManagedCacheToBuild {
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Ext4.dll"); Target = (Join-Path (Get-Location).Path "build\ext4.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Storage.dll"); Target = (Join-Path (Get-Location).Path "build\storage.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Vfs.dll"); Target = (Join-Path (Get-Location).Path "build\vfs.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "Zapada.Shell.dll"); Target = (Join-Path (Get-Location).Path "build\shell.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "System.Console.dll"); Target = (Join-Path (Get-Location).Path "build\System.Console.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Conformance.CrossAsm.dll"); Target = (Join-Path (Get-Location).Path "build\conf-crossasm.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Conformance.dll"); Target = (Join-Path (Get-Location).Path "build\conf.dll"); Required = $false }
     )
@@ -335,6 +338,17 @@ Publish-ManagedAssembly `
     -PublishFailureMessage "ERROR: dotnet publish Zapada.Test.Hello failed."
 
 Publish-ManagedAssembly `
+    -DisplayName "shared driver HAL contracts (Zapada.Drivers)" `
+    -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.Drivers\Zapada.Drivers.csproj") `
+    -PublishOut (Join-Path (Get-Location).Path "build\drivers-out") `
+    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\drivers-out") "Zapada.Drivers.dll") `
+    -StagedDllPath (Join-Path (Get-Location).Path "build\drivers.dll") `
+    -CacheDllPath (Join-Path $managedCacheRoot "Zapada.Drivers.dll") `
+    -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Drivers not built; Zapada.Drivers.dll will be missing." `
+    -MissingProjectMessage "  WARNING: Zapada.Drivers.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Drivers\Zapada.Drivers.csproj"); skipping." `
+    -PublishFailureMessage "ERROR: dotnet publish Zapada.Drivers failed."
+
+Publish-ManagedAssembly `
     -DisplayName "VirtioBlock driver (Zapada.Drivers.VirtioBlock)" `
     -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.Drivers.VirtioBlock\Zapada.Drivers.VirtioBlock.csproj") `
     -PublishOut (Join-Path (Get-Location).Path "build\vblk-out") `
@@ -410,6 +424,17 @@ Publish-ManagedAssembly `
     -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Fs.Vfs not built; Zapada.Fs.Vfs.dll will be missing." `
     -MissingProjectMessage "  WARNING: Zapada.Fs.Vfs.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Fs.Vfs\Zapada.Fs.Vfs.csproj"); skipping." `
     -PublishFailureMessage "ERROR: dotnet publish Zapada.Fs.Vfs failed."
+
+Publish-ManagedAssembly `
+    -DisplayName "managed shell (Zapada.Shell)" `
+    -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.Shell\Zapada.Shell.csproj") `
+    -PublishOut (Join-Path (Get-Location).Path "build\shell-out") `
+    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\shell-out") "Zapada.Shell.dll") `
+    -StagedDllPath (Join-Path (Get-Location).Path "build\shell.dll") `
+    -CacheDllPath (Join-Path $managedCacheRoot "Zapada.Shell.dll") `
+    -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Shell not built; Zapada.Shell.dll will be missing." `
+    -MissingProjectMessage "  WARNING: Zapada.Shell.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Shell\Zapada.Shell.csproj"); skipping." `
+    -PublishFailureMessage "ERROR: dotnet publish Zapada.Shell failed."
 
 Publish-ManagedAssembly `
     -DisplayName "cross-assembly conformance fixture (Zapada.Conformance.CrossAsm)" `

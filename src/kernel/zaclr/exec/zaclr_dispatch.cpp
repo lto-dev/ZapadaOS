@@ -1388,7 +1388,7 @@ namespace
             return zaclr_result_make(ZACLR_STATUS_DISPATCH_ERROR, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        if (frame->method != NULL
+        if (false && frame->method != NULL
             && frame->method->name.text != NULL
             && text_equals(frame->method->name.text, "Equals")
             && frame->assembly != NULL
@@ -2205,27 +2205,6 @@ namespace
                                                        &nested_method_table);
                     if (nested_result.status == ZACLR_STATUS_OK && nested_method_table != NULL)
                     {
-                        console_write("[ZACLR][static-zero] nested type=");
-                        console_write(nested_type->type_namespace.text != NULL ? nested_type->type_namespace.text : "<null-ns>");
-                        console_write(".");
-                        console_write(nested_type->type_name.text != NULL ? nested_type->type_name.text : "<null-type>");
-                        console_write(" instance_size=");
-                        console_write_dec((uint64_t)nested_method_table->instance_size);
-                        console_write(" instance_field_count=");
-                        console_write_dec((uint64_t)nested_method_table->instance_field_count);
-                        console_write(" flags=");
-                        console_write_hex64((uint64_t)nested_method_table->flags);
-                        if (nested_method_table->instance_fields != NULL && nested_method_table->instance_field_count > 0u)
-                        {
-                            console_write(" first_field_size=");
-                            console_write_dec((uint64_t)nested_method_table->instance_fields[0].field_size);
-                            console_write(" first_field_offset=");
-                            console_write_dec((uint64_t)nested_method_table->instance_fields[0].byte_offset);
-                            console_write(" first_field_elem=");
-                            console_write_hex64((uint64_t)nested_method_table->instance_fields[0].element_type);
-                        }
-                        console_write("\n");
-
                         if (nested_method_table->instance_field_count != 0u && nested_method_table->instance_fields != NULL)
                         {
                             uint32_t max_end = 0u;
@@ -2255,14 +2234,6 @@ namespace
         {
             struct zaclr_stack_value zero_value = {};
             uint8_t inline_zero[ZACLR_STACK_VALUE_INLINE_BUFFER_BYTES] = {};
-
-            console_write("[ZACLR][static-zero-final] token=");
-            console_write_hex64((uint64_t)token.raw);
-            console_write(" field_size=");
-            console_write_dec((uint64_t)field_size);
-            console_write(" value_type_token=");
-            console_write_hex64((uint64_t)value_type_token_raw);
-            console_write("\n");
 
             if (field_size <= sizeof(inline_zero))
             {
@@ -2398,7 +2369,7 @@ namespace
             return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
         }
 
-        if (type_desc != NULL
+        if (false && type_desc != NULL
             && type_desc->type_namespace.text != NULL
             && type_desc->type_name.text != NULL
             && text_equals(type_desc->type_namespace.text, "System")
@@ -5676,7 +5647,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         //                   (uint64_t)frame->il_offset);
     }
 
-    if (frame->method != NULL
+    if (false && frame->method != NULL
         && frame->method->token.raw == 0x06000A4Bu
         && frame->il_offset <= 12u)
     {
@@ -5693,7 +5664,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         console_write("\n");
     }
 
-    if (frame->method != NULL
+    if (false && frame->method != NULL
         && frame->method->token.raw == 0x06000079u
         && frame->il_offset >= 0x00AAu
         && frame->il_offset <= 0x0116u)
@@ -5739,7 +5710,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         console_write("\n");
     }
 
-    if (frame->method != NULL
+    if (false && frame->method != NULL
         && frame->method->name.text != NULL
         && (text_equals(frame->method->name.text, "get_ModuleHandle")
             || text_equals(frame->method->name.text, "GetModuleHandleImpl")))
@@ -5839,17 +5810,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
-            console_write("[ZACLR][ldind.ref] addr_kind=");
-            console_write_dec((uint64_t)address_value.kind);
-            console_write(" flags=");
-            console_write_hex64((uint64_t)address_value.flags);
-            console_write(" payload=");
-            console_write_dec((uint64_t)address_value.payload_size);
-            console_write(" raw=");
-            console_write_hex64((uint64_t)address_value.data.raw);
-            console_write(" type_token=");
-            console_write_hex64((uint64_t)address_value.type_token_raw);
-            console_write("\n");
             frame->il_offset += 1u;
             result = load_indirect_ref(frame->runtime, frame, &address_value, &handle);
             if (result.status != ZACLR_STATUS_OK)
@@ -5985,7 +5945,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 
                 method_tag = methodspec_row.method_coded_index & 0x1u;
                 method_row = methodspec_row.method_coded_index >> 1u;
-                if (token.raw == 0x2B00017Au)
+                if (false && token.raw == 0x2B00017Au)
                 {
                     console_write("[ZACLR][call] MethodSpec 0x2B00017A coded_index=");
                     console_write_hex64((uint64_t)methodspec_row.method_coded_index);
@@ -6036,7 +5996,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     return zaclr_result_make(ZACLR_STATUS_NOT_FOUND, ZACLR_STATUS_CATEGORY_EXEC);
                 }
 
-                if (token.raw == 0x2B00017Au)
+                if (false && token.raw == 0x2B00017Au)
                 {
                     struct zaclr_methoddef_row debug_row = {};
                     struct zaclr_signature_type parameter_type = {};
@@ -6145,7 +6105,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                       ZACLR_TRACE_EVENT_CALL_TARGET,
                                       method->name.text != NULL ? method->name.text : "<null-method-name>",
                                       (uint64_t)method->token.raw);
-                    if (method->token.raw == 0x06008106u)
+                    if (false && method->token.raw == 0x06008106u)
                     {
                         console_write("[ZACLR][call] ObjectHandleOnStack.Create parent_depth=");
                         console_write_dec((uint64_t)frame->eval_stack.depth);
@@ -6157,7 +6117,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 
                 {
                     const struct zaclr_type_desc* owning_type = zaclr_type_map_find_by_token(&frame->assembly->type_map, method->owning_type_token);
-                if (method->name.text != NULL && text_equals(method->name.text, "get_Module"))
+                if (false && method->name.text != NULL && text_equals(method->name.text, "get_Module"))
                 {
                     console_write("[ZACLR][callvirt] get_Module owner=");
                     console_write(owning_type != NULL && owning_type->type_namespace.text != NULL ? owning_type->type_namespace.text : "<null-ns>");
@@ -6470,7 +6430,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                         }
 
                         result = zaclr_frame_bind_arguments(child, &frame->eval_stack);
-                        if (child->method != NULL
+                        if (false && child->method != NULL
                             && child->method->name.text != NULL
                             && text_equals(child->method->name.text, "Equals")
                             && child->assembly != NULL
@@ -6538,22 +6498,8 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                             return result;
                         }
 
-                        console_write("[ZACLR][call] resolved ptrs asm=");
-                        console_write_hex64((uint64_t)(uintptr_t)target.assembly);
-                        console_write(" type=");
-                        console_write_hex64((uint64_t)(uintptr_t)target.owning_type);
-                        console_write(" method=");
-                        console_write_hex64((uint64_t)(uintptr_t)target.method);
-                        console_write("\n");
-
                         if (method_is_type_initializer_trigger(target.method))
                         {
-                            console_write("[ZACLR][call] before cctor asm_ptr=");
-                            console_write_hex64((uint64_t)(uintptr_t)target.assembly);
-                            console_write(" method_ptr=");
-                            console_write_hex64((uint64_t)(uintptr_t)target.method);
-                            console_write("\n");
-
                             /* When the owning type is a generic instantiation, substitute the
                                caller frame's generic context into the TypeSpec's type_args so
                                the .cctor frame can resolve bare VAR(n)/MVAR(n) tokens. */
@@ -6562,37 +6508,10 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                             {
                                 struct zaclr_generic_context concrete_type_context = {};
 
-                                console_write("[ZACLR][subst] frame.type_arg_count=");
-                                console_write_dec((uint64_t)frame->generic_context.type_arg_count);
-                                console_write(" frame.method_arg_count=");
-                                console_write_dec((uint64_t)frame->generic_context.method_arg_count);
-                                if (frame->generic_context.type_arg_count > 0u && frame->generic_context.type_args != NULL)
-                                {
-                                    console_write(" frame.type_args[0].kind=");
-                                    console_write_dec((uint64_t)frame->generic_context.type_args[0].kind);
-                                }
-                                if (frame->generic_context.method_arg_count > 0u && frame->generic_context.method_args != NULL)
-                                {
-                                    console_write(" frame.method_args[0].kind=");
-                                    console_write_dec((uint64_t)frame->generic_context.method_args[0].kind);
-                                    console_write(" elem_type=0x");
-                                    console_write_hex64((uint64_t)frame->generic_context.method_args[0].element_type);
-                                }
-                                console_write("\n");
-
                                 result = zaclr_generic_context_substitute_type_args(
                                     &concrete_type_context,
                                     &target.owning_typespec.generic_context,
                                     &frame->generic_context);
-
-                                if (result.status == ZACLR_STATUS_OK && concrete_type_context.type_arg_count > 0u && concrete_type_context.type_args != NULL)
-                                {
-                                    console_write("[ZACLR][subst] result.type_args[0].kind=");
-                                    console_write_dec((uint64_t)concrete_type_context.type_args[0].kind);
-                                    console_write(" elem_type=0x");
-                                    console_write_hex64((uint64_t)concrete_type_context.type_args[0].element_type);
-                                    console_write("\n");
-                                }
 
                                 if (result.status == ZACLR_STATUS_OK)
                                 {
@@ -6617,16 +6536,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                 zaclr_call_target_reset(&target);
                                 return result;
                             }
-
-                            console_write("[ZACLR][call] after cctor asm_ptr=");
-                            console_write_hex64((uint64_t)(uintptr_t)target.assembly);
-                            console_write(" method_ptr=");
-                            console_write_hex64((uint64_t)(uintptr_t)target.method);
-                            console_write(" registry_entries=");
-                            console_write_hex64((uint64_t)(uintptr_t)context->runtime->assemblies.entries);
-                            console_write(" count=");
-                            console_write_dec((uint64_t)context->runtime->assemblies.count);
-                            console_write("\n");
                         }
 
                         ZACLR_TRACE_VALUE(context->runtime,
@@ -6675,7 +6584,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                             && frame->eval_stack.depth > target.method->signature.parameter_count)
                         {
                             uint32_t this_index = frame->eval_stack.depth - target.method->signature.parameter_count - 1u;
-                            if (target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
+                            if (false && target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
                             {
                                 console_write("[ZACLR][memberref-virt] depth=");
                                 console_write_dec((uint64_t)frame->eval_stack.depth);
@@ -6688,7 +6597,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                             if (this_index < frame->eval_stack.depth)
                             {
                                 const struct zaclr_stack_value* this_val = &frame->eval_stack.values[this_index];
-                                if (target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
+                                if (false && target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
                                 {
                                     console_write("[ZACLR][memberref-virt] this_kind=");
                                     console_write_dec((uint64_t)this_val->kind);
@@ -6701,7 +6610,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                 {
                                     const struct zaclr_method_table* runtime_mt =
                                         this_val->data.object_reference->header.method_table;
-                                    if (target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
+                                    if (false && target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
                                     {
                                         console_write("[ZACLR][memberref-virt] runtime_mt=");
                                         console_write_hex64((uint64_t)(uintptr_t)runtime_mt);
@@ -6717,7 +6626,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                     {
                                         const struct zaclr_method_desc* override =
                                             zaclr_method_table_resolve_virtual(runtime_mt, target.method);
-                                        if (target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
+                                        if (false && target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
                                         {
                                             console_write("[ZACLR][memberref-virt] override=");
                                             console_write_hex64((uint64_t)(uintptr_t)override);
@@ -6757,7 +6666,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                             }
                         }
 
-                        if (target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
+                        if (false && target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
                         {
                             console_write("[ZACLR][memberref] get_Module owner=");
                             console_write(target.owning_type != NULL && target.owning_type->type_namespace.text != NULL ? target.owning_type->type_namespace.text : "<null-ns>");
@@ -6776,7 +6685,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                         {
                             const struct zaclr_type_desc* intrinsic_type = target.owning_type;
 
-                            if (target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
+                            if (false && target.method->name.text != NULL && text_equals(target.method->name.text, "get_Module"))
                             {
                                 console_write("[ZACLR][memberref] intrinsic_type=");
                                 console_write(intrinsic_type != NULL && intrinsic_type->type_namespace.text != NULL ? intrinsic_type->type_namespace.text : "<null-ns>");
@@ -7216,14 +7125,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 const struct zaclr_type_desc* target_type = NULL;
                 const struct zaclr_method_desc* target_method = NULL;
 
-                console_write("[ZACLR][call] memberref resolve begin assembly=");
-                console_write(memberref.assembly_name != NULL ? memberref.assembly_name : "<null>");
-                console_write(" type=");
-                console_write(memberref.key.type_name != NULL ? memberref.key.type_name : "<null>");
-                console_write(" method=");
-                console_write(memberref.key.method_name != NULL ? memberref.key.method_name : "<null>");
-                console_write("\n");
-
                 result = zaclr_member_resolution_resolve_method(frame->runtime,
                                                                 frame->assembly,
                                                                 &memberref,
@@ -7236,14 +7137,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     return result;
                 }
 
-                console_write("[ZACLR][call] memberref resolve ok assembly=");
-                console_write(target_assembly != NULL && target_assembly->assembly_name.text != NULL ? target_assembly->assembly_name.text : "<null>");
-                console_write(" type=");
-                console_write(target_type != NULL && target_type->type_name.text != NULL ? target_type->type_name.text : "<null>");
-                console_write(" method=");
-                console_write(target_method != NULL && target_method->name.text != NULL ? target_method->name.text : "<null>");
-                console_write("\n");
-
                 result = ensure_type_initializer_ran(context->runtime,
                                                      target_assembly,
                                                      target_type);
@@ -7252,8 +7145,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                     console_write("[ZACLR][call] ensure_type_initializer_ran failed\n");
                     return result;
                 }
-
-                console_write("[ZACLR][call] after ensure_type_initializer_ran\n");
 
                 ZACLR_TRACE_VALUE(context->runtime,
                                   ZACLR_TRACE_CATEGORY_EXEC,
@@ -7971,7 +7862,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         case CEE_STSFLD:
         {
             struct zaclr_token token = zaclr_token_make(read_u32(frame->il_start + frame->il_offset + 1u));
-            if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+            if (false && frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
             {
                 console_write("[ZACLR][exec] Type.cctor stsfld token=");
                 console_write_hex64((uint64_t)token.raw);
@@ -7982,7 +7873,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             frame->il_offset += 5u;
             {
                 struct zaclr_result result = store_static_field(frame, token);
-                if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+                if (false && frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
                 {
                     console_write("[ZACLR][exec] Type.cctor stsfld status=");
                     console_write_dec((uint64_t)result.status);
@@ -8241,7 +8132,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 return result;
             }
 
-            if (frame->method != NULL
+            if (false && frame->method != NULL
                 && frame->method->name.text != NULL
                 && text_equals(frame->method->name.text, "Equals")
                 && frame->assembly != NULL
@@ -8385,20 +8276,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                 && frame->method->name.text != NULL
                 && text_equals(frame->method->name.text, "GetTypeFromHandle"))
             {
-                console_write("[ZACLR][ldfld] normal path object_ptr=");
-                console_write_hex64((uint64_t)(uintptr_t)object);
-                console_write(" token=");
-                console_write_hex64((uint64_t)token.raw);
-                console_write(" kind=");
-                console_write_hex64((uint64_t)object_value.kind);
-                console_write(" flags=");
-                console_write_hex64((uint64_t)(object != NULL ? zaclr_object_flags(object) : 0u));
-                console_write(" family=");
-                console_write_hex64((uint64_t)(object != NULL ? zaclr_object_family(object) : 0u));
-                console_write(" type_id=");
-                console_write_hex64((uint64_t)(object != NULL ? zaclr_object_type_id(object) : 0u));
-                console_write("\n");
-
                 if (token.raw == 0x04000261u && object != NULL)
                 {
                     struct zaclr_stack_value passthrough = {};
@@ -8692,7 +8569,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             struct zaclr_stack_value* slot = NULL;
             struct zaclr_result result;
 
-            if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+            if (false && frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
             {
                 console_write("[ZACLR][exec] Type.cctor ldsflda token=");
                 console_write_hex64((uint64_t)token.raw);
@@ -8732,7 +8609,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 
             {
                 struct zaclr_result push_result = zaclr_eval_stack_push(&frame->eval_stack, &address_value);
-                if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+                if (false && frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
                 {
                     console_write("[ZACLR][exec] Type.cctor ldsflda push_status=");
                     console_write_dec((uint64_t)push_result.status);
@@ -8827,7 +8704,7 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
         case CEE_LDLOCA_S:
         {
             uint32_t local_index = frame->il_start[frame->il_offset + 1u];
-            if (frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
+            if (false && frame->method != NULL && frame->method->token.raw == 0x06000A4Bu)
             {
                 console_write("[ZACLR][exec] Type.cctor ldloca.s local=");
                 console_write_dec((uint64_t)local_index);
@@ -8948,18 +8825,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
             struct zaclr_runtime_type_desc* runtime_type;
             uint32_t type_row;
 
-            console_write("[ZACLR][ldtoken] method=");
-            console_write(frame->method != NULL && frame->method->name.text != NULL ? frame->method->name.text : "<null>");
-            console_write(" token_raw=");
-            console_write_hex64((uint64_t)token.raw);
-            console_write(" type_args=");
-            console_write_dec((uint64_t)frame->generic_context.type_arg_count);
-            console_write(" method_args=");
-            console_write_dec((uint64_t)frame->generic_context.method_arg_count);
-            console_write(" il_offset=");
-            console_write_dec((uint64_t)frame->il_offset);
-            console_write("\n");
-
             frame->il_offset += 5u;
 
             if (frame->method != NULL
@@ -9055,22 +8920,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
 
                 runtime_type_handle = zaclr_heap_get_object_handle(&frame->runtime->heap, &runtime_type->object);
                 ((struct zaclr_loaded_assembly*)target_assembly)->runtime_type_cache[type_row - 1u] = runtime_type_handle;
-            }
-
-            {
-                struct zaclr_object_desc* pushed_object = zaclr_heap_get_object(&frame->runtime->heap, runtime_type_handle);
-                const struct zaclr_method_table* pushed_mt = pushed_object != NULL ? pushed_object->header.method_table : NULL;
-                console_write("[ZACLR][ldtoken-push] handle=");
-                console_write_hex64((uint64_t)runtime_type_handle);
-                console_write(" target=");
-                console_write(target_type != NULL && target_type->type_namespace.text != NULL ? target_type->type_namespace.text : "<null-ns>");
-                console_write(".");
-                console_write(target_type != NULL && target_type->type_name.text != NULL ? target_type->type_name.text : "<null-type>");
-                console_write(" pushed_type=");
-                console_write(pushed_mt != NULL && pushed_mt->type_desc != NULL && pushed_mt->type_desc->type_namespace.text != NULL ? pushed_mt->type_desc->type_namespace.text : "<null-ns>");
-                console_write(".");
-                console_write(pushed_mt != NULL && pushed_mt->type_desc != NULL && pushed_mt->type_desc->type_name.text != NULL ? pushed_mt->type_desc->type_name.text : "<null-type>");
-                console_write("\n");
             }
 
             return push_object_handle(frame, runtime_type_handle);
@@ -10257,15 +10106,6 @@ extern "C" struct zaclr_result zaclr_dispatch_step(struct zaclr_dispatch_context
                                                                                  frame->method->owning_type_token.raw,
                                                                                  payload,
                                                                                  payload_size);
-                    console_write("[ZACLR][ret-newobj] valuetype method=");
-                    console_write(frame->method != NULL && frame->method->name.text != NULL ? frame->method->name.text : "<null>");
-                    console_write(" token=");
-                    console_write_hex64((uint64_t)(frame->method != NULL ? frame->method->owning_type_token.raw : 0u));
-                    console_write(" payload=");
-                    console_write_dec((uint64_t)payload_size);
-                    console_write(" set_status=");
-                    console_write_dec((uint64_t)result.status);
-                    console_write("\n");
                     if (result.status != ZACLR_STATUS_OK)
                     {
                         zaclr_stack_value_reset(&value_result);

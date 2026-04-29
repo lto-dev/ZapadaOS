@@ -18,7 +18,7 @@ namespace
     static void console_write_ascii_char(uint16_t value)
     {
         char text[2];
-        text[0] = value == '\n' || value == '\r' || value == '\t' || (value >= 32u && value <= 126u)
+        text[0] = value == '\n' || value == '\r' || value == '\t' || value == '\b' || (value >= 32u && value <= 126u)
             ? (char)(uint8_t)value
             : '?';
         text[1] = '\0';
@@ -538,6 +538,11 @@ namespace
         (void)frame;
         return console_set_void(frame, append_newline);
     }
+}
+
+struct zaclr_result zaclr_native_System_Console::Read___STATIC__I4(struct zaclr_native_call_frame& frame)
+{
+    return zaclr_native_call_frame_set_i4(&frame, console_read_char());
 }
 
 struct zaclr_result zaclr_native_System_Console::WriteLine___STATIC__VOID(struct zaclr_native_call_frame& frame)

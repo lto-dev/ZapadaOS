@@ -9,6 +9,9 @@ extern "C" {
 
 struct zaclr_native_System_Console
 {
+    static struct zaclr_result Read___STATIC__I4(
+        struct zaclr_native_call_frame& frame);
+
     static struct zaclr_result WriteLine___STATIC__VOID(
         struct zaclr_native_call_frame& frame);
 

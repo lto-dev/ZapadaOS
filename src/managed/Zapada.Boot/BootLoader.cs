@@ -43,6 +43,7 @@
 using System;
 using Zapada.Fs.Ext;
 using Zapada.Fs.Vfs;
+using Zapada.Shell;
 using Zapada.Storage;
 
 namespace Zapada.Boot
@@ -155,6 +156,14 @@ namespace Zapada.Boot
             }
 
             MountPersistentRootAndCompatibilityVolume();
+
+            int shellRc = ShellHost.RunBootShell();
+            if (shellRc != StorageStatus.Ok)
+            {
+                Console.Write("[Boot] Shell startup failed rc=");
+                Console.Write(shellRc);
+                Console.Write("\n");
+            }
 
             /* Gate D: boot sequence complete. */
             Console.Write("[Gate] GateD\n");

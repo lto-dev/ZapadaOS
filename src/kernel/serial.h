@@ -50,6 +50,21 @@ void serial_write_hex64(uint64_t value);
  */
 void serial_write_dec(uint64_t value);
 
+/*
+ * serial_can_read - Return true when COM1 has a pending input byte.
+ */
+bool serial_can_read(void);
+
+/*
+ * serial_try_read_char - Read one input byte, or -1 if no byte is ready.
+ */
+int serial_try_read_char(void);
+
+/*
+ * serial_read_char - Block until one input byte is available, then read it.
+ */
+int serial_read_char(void);
+
 #endif /* ZAPADA_SERIAL_H */
 
 

@@ -16,10 +16,8 @@ public static class Vfs
     /// </summary>
     public static int Initialize()
     {
-        Console.Write("[VFS] Initialize.enter\n");
         if (s_initialized)
         {
-            Console.Write("[VFS] Initialize.already\n");
             return StorageStatus.Ok;
         }
 
@@ -28,22 +26,15 @@ public static class Vfs
         // sequence for deterministic ordering.
         MountTable.Initialize();
         FdTable.Initialize();
-        Console.Write("[VFS] Initialize.tables-ready\n");
 
         RamFsVolume bootstrapRoot = new RamFsVolume();
         bootstrapRoot.InitializeRamFs();
 
         int rootSlot = MountTable.Mount("/", bootstrapRoot);
-        Console.Write("[VFS] Initialize.mount-root= ");
-        Console.Write(rootSlot);
-        Console.Write("\n");
         if (rootSlot < 0)
             return rootSlot;
 
         s_initialized = true;
-        Console.Write("[VFS] Initialize.mount-count= ");
-        Console.Write(MountTable.Count);
-        Console.Write("\n");
         return StorageStatus.Ok;
     }
 
@@ -66,6 +57,33 @@ public static class Vfs
         return MountTable.ReplaceRoot(volume);
     }
 
+    public static int PrintMounts()
+    {
+        if (!s_initialized)
+            return StorageStatus.NotMounted;
+
+        Console.Write("[VFS] mounted filesystems\n");
+        for (int i = 0; i < MountTable.Count; i++)
+        {
+            string? path = MountTable.GetPath(i);
+            MountedVolume? volume = MountTable.GetVolume(i);
+            if (path == null || volume == null)
+                continue;
+
+            Console.Write("  ");
+            Console.Write(path);
+            Console.Write(" -> ");
+            Console.Write(volume.GetDisplayName());
+            Console.Write(" driver=");
+            Console.Write(volume.GetDriverKey());
+            Console.Write(" label=");
+            Console.Write(volume.GetVolumeLabel());
+            Console.Write("\n");
+        }
+
+        return StorageStatus.Ok;
+    }
+
     /// <summary>
     /// Open a file by absolute path. Returns a file descriptor index, or -1 on failure.
     /// </summary>
@@ -73,15 +91,12 @@ public static class Vfs
     {
         string localPath;
 
-        Console.Write("[VFS] Open.enter\n");
-
         if (!s_initialized)
         {
             Console.Write("[VFS] Open.not-mounted\n");
             return StorageStatus.NotMounted;
         }
 
-        Console.Write("[VFS] Open.resolve\n");
         int slot = PathResolver.Resolve(path);
         if (slot < 0)
         {
@@ -89,7 +104,6 @@ public static class Vfs
             return StorageStatus.NotFound;
         }
 
-        Console.Write("[VFS] Open.get-volume\n");
         MountedVolume? volume = MountTable.GetVolume(slot);
         if (volume == null)
         {
@@ -118,10 +132,6 @@ public static class Vfs
             return StorageStatus.NotFound;
         }
 
-        Console.Write("[VFS] Open.resolve-node\n");
-        Console.Write("[VFS] Open.localPath=");
-        Console.Write(localPath);
-        Console.Write("\n");
         int nodeHandle = volume.Resolve(localPath);
         if (nodeHandle < 0)
         {
@@ -129,7 +139,6 @@ public static class Vfs
             return nodeHandle;
         }
 
-        Console.Write("[VFS] Open.volume-open\n");
         int token = volume.Open(nodeHandle, FileAccessIntent.ReadOnly);
         if (token < 0)
         {
@@ -143,14 +152,8 @@ public static class Vfs
         if (statRc >= 0)
         {
             size = (int)facts.Size;
-            Console.Write("[VFS] Open.stat-ok\n");
-        }
-        else
-        {
-            Console.Write("[VFS] Open.stat-failed\n");
         }
 
-        Console.Write("[VFS] Open.alloc-fd\n");
         int fd = FdTable.Alloc(slot, token, size);
         if (fd < 0)
         {
@@ -159,7 +162,6 @@ public static class Vfs
             return StorageStatus.TableFull;
         }
 
-        Console.Write("[VFS] Open.ok\n");
         return fd;
     }
 
@@ -212,12 +214,20 @@ public static class Vfs
 
     public static int List(string path)
     {
+        return List(path, new DebugListSink());
+    }
+
+    public static int List(string path, DirectoryEntrySink sink)
+    {
         string localPath;
 
         if (!s_initialized)
         {
             return StorageStatus.NotMounted;
         }
+
+        if (sink == null)
+            return StorageStatus.InvalidArgument;
 
         int slot = PathResolver.Resolve(path);
         if (slot < 0)
@@ -254,7 +264,7 @@ public static class Vfs
         if (nodeHandle < 0)
             return nodeHandle;
 
-        return volume.ListDirectory(nodeHandle, new DebugListSink());
+        return volume.ListDirectory(nodeHandle, sink);
     }
 
     private sealed class DebugListSink : DirectoryEntrySink

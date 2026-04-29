@@ -232,12 +232,6 @@ extern "C" struct zaclr_result zaclr_internal_call_registry_resolve_exact(
 
         if (matches)
         {
-            log_method_search_line("MethodSearch.Found",
-                                   assembly->assembly_name,
-                                   candidate->type_namespace,
-                                   candidate->type_name,
-                                   candidate->method_name,
-                                   method_index + 1u);
             out_resolution->assembly_name = assembly->assembly_name;
             out_resolution->method = candidate;
             registry->row_cache[registry->row_cache_next].assembly_id = owning_assembly->id;

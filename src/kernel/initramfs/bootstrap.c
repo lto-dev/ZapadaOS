@@ -142,6 +142,7 @@ void initramfs_bootstrap(const uint8_t *module_start, uint32_t module_size)
         initramfs_log_lookup("System.dll");
         initramfs_log_lookup("System.Runtime.dll");
         initramfs_log_lookup("Zapada.Boot.dll");
+        initramfs_log_lookup("Zapada.Drivers.dll");
         initramfs_log_lookup("Zapada.Drivers.VirtioBlock.dll");
         initramfs_log_lookup("Zapada.Fs.Gpt.dll");
         initramfs_log_lookup("Zapada.Storage.dll");
@@ -200,6 +201,7 @@ void initramfs_bootstrap(const uint8_t *module_start, uint32_t module_size)
     initramfs_log_lookup("System.dll");
     initramfs_log_lookup("System.Runtime.dll");
     initramfs_log_lookup("Zapada.Boot.dll");
+    initramfs_log_lookup("Zapada.Drivers.dll");
     initramfs_log_lookup("Zapada.Drivers.VirtioBlock.dll");
     initramfs_log_lookup("Zapada.Fs.Gpt.dll");
     initramfs_log_lookup("Zapada.Storage.dll");

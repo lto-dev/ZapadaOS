@@ -519,16 +519,6 @@ namespace
             return result;
         }
 
-        console_write("[ZACLR][frame-create] parsed fat header max_stack=");
-        console_write_dec((uint64_t)frame->max_stack);
-        console_write(" il_size=");
-        console_write_dec((uint64_t)frame->il_size);
-        console_write(" local_count=");
-        console_write_dec((uint64_t)frame->local_count);
-        console_write(" method=");
-        console_write(method != NULL && method->name.text != NULL ? method->name.text : "<null>");
-        console_write("\n");
-
             if ((fat_header_flags & 0x0008u) != 0u)
             {
                 result = parse_exception_section(assembly,
@@ -712,7 +702,7 @@ extern "C" struct zaclr_result zaclr_frame_bind_arguments(struct zaclr_frame* fr
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
-    if (frame->method != NULL
+    if (false && frame->method != NULL
         && frame->method->name.text != NULL
         && frame->assembly != NULL
         && frame->assembly->assembly_name.text != NULL

@@ -45,3 +45,18 @@ void console_write_dec(uint64_t val)
     }
 }
 
+bool console_can_read(void)
+{
+    return serial_can_read();
+}
+
+int console_try_read_char(void)
+{
+    return serial_try_read_char();
+}
+
+int console_read_char(void)
+{
+    return serial_read_char();
+}
+
