@@ -35,6 +35,14 @@ namespace Zapada.Drivers
          */
         public static int Initialize()
         {
+            DriverRegistry.Register(
+                "virtio-blk",
+                "Zapada.Drivers.VirtioBlock",
+                "block.device:vda,hal.smoke",
+                "Zapada.Drivers.Hal",
+                "pci:1af4:1001,pci:1af4:1042",
+                DriverState.Started);
+
             Console.Write("[Boot] VirtioBlock managed bridge initialized\n");
             Console.Write("[Gate] Phase31-D1\n");
 

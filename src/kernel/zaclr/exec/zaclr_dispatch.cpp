@@ -361,6 +361,26 @@ namespace
         write_u32(data + 4u, (uint32_t)(value >> 32));
     }
 
+    static zaclr_object_handle read_object_handle_value(const uint8_t* data)
+    {
+        zaclr_object_handle value = 0u;
+
+        if (data != NULL)
+        {
+            kernel_memcpy(&value, data, (uint32_t)sizeof(value));
+        }
+
+        return value;
+    }
+
+    static void write_object_handle_value(uint8_t* data, zaclr_object_handle value)
+    {
+        if (data != NULL)
+        {
+            kernel_memcpy(data, &value, (uint32_t)sizeof(value));
+        }
+    }
+
     static bool text_equals(const char* left, const char* right)
     {
         return zaclr_text_equals(left, right);
@@ -626,7 +646,7 @@ namespace
 
         if (zaclr_token_matches_table(&token, ZACLR_TOKEN_TABLE_TYPESPEC))
         {
-            return 4u;
+            return sizeof(zaclr_object_handle);
         }
 
         result = metadata_get_type_name(assembly, token, &type_name);
@@ -5456,8 +5476,13 @@ namespace
             case CEE_LDELEM_R8:
                 return push_r8(frame, read_u64(data + byte_offset));
             case CEE_LDELEM_REF:
-                return push_object_handle(frame, (zaclr_object_handle)read_u32(data + byte_offset));
+                return push_object_handle(frame, read_object_handle_value(data + byte_offset));
             case CEE_LDELEM:
+                if (token_is_heap_reference(element_type))
+                {
+                    return push_object_handle(frame, read_object_handle_value(data + byte_offset));
+                }
+
                 if (element_size == 1u)
                 {
                     return push_i4(frame, (int32_t)data[byte_offset]);
@@ -5470,11 +5495,6 @@ namespace
 
                 if (element_size == 4u)
                 {
-                    if (token_is_heap_reference(element_type))
-                    {
-                        return push_object_handle(frame, (zaclr_object_handle)read_u32(data + byte_offset));
-                    }
-
                     return push_i4(frame, (int32_t)read_u32(data + byte_offset));
                 }
 
@@ -5552,9 +5572,17 @@ namespace
             case CEE_STELEM_REF:
                 result = stack_value_to_object_handle(runtime, value, &value_object);
                 if (result.status != ZACLR_STATUS_OK) return result;
-                write_u32(data + byte_offset, value_object);
+                write_object_handle_value(data + byte_offset, value_object);
                 return zaclr_result_ok();
             case CEE_STELEM:
+                if (token_is_heap_reference(element_type))
+                {
+                    result = stack_value_to_object_handle(runtime, value, &value_object);
+                    if (result.status != ZACLR_STATUS_OK) return result;
+                    write_object_handle_value(data + byte_offset, value_object);
+                    return zaclr_result_ok();
+                }
+
                 if (element_size == 1u)
                 {
                     result = stack_value_to_i32(value, &value_i4);
@@ -5573,14 +5601,6 @@ namespace
 
                 if (element_size == 4u)
                 {
-                    if (token_is_heap_reference(element_type))
-                    {
-                        result = stack_value_to_object_handle(runtime, value, &value_object);
-                        if (result.status != ZACLR_STATUS_OK) return result;
-                        write_u32(data + byte_offset, value_object);
-                        return zaclr_result_ok();
-                    }
-
                     result = stack_value_to_i32(value, &value_i4);
                     if (result.status != ZACLR_STATUS_OK) return result;
                     write_u32(data + byte_offset, (uint32_t)value_i4);

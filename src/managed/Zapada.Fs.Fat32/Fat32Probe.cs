@@ -42,17 +42,13 @@ internal sealed class Fat32Probe : VolumeProbe
         return 100;
     }
 
-    public override MountedVolume? Mount(PartitionView partition)
+    public override MountedVolume Mount(PartitionView partition)
     {
         if (partition == null)
             return null;
 
-        long startLba = partition.GetStartLba();
-        if (startLba < 0 || startLba > 2147483647L)
-            return null;
-
         Fat32Volume volume = new Fat32Volume();
-        int rc = volume.Initialize((int)startLba);
+        int rc = volume.Initialize(partition);
         if (rc != StorageStatus.Ok)
             return null;
 

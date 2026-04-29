@@ -11,6 +11,7 @@
     <Deterministic>true</Deterministic>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../Zapada.Drivers/Zapada.Drivers.csproj" />
     <ProjectReference Include="../Zapada.Fs.Vfs/Zapada.Fs.Vfs.csproj" />
     <ProjectReference Include="../Zapada.Storage/Zapada.Storage.csproj" />
   </ItemGroup>

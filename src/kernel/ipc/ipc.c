@@ -214,6 +214,22 @@ ipc_result_t ipc_channel_destroy(ipc_handle_t h)
 }
 
 /* ---------------------------------------------------------------------- */
+/* ipc_channel_is_open                                                     */
+/* ---------------------------------------------------------------------- */
+
+bool ipc_channel_is_open(ipc_handle_t h)
+{
+    ipc_channel_t *ch;
+
+    if (h == IPC_HANDLE_INVALID) {
+        return false;
+    }
+
+    ch = chan_from_handle(h);
+    return ch != NULL && ch->state == CHAN_OPEN;
+}
+
+/* ---------------------------------------------------------------------- */
 /* ipc_trysend                                                             */
 /* ---------------------------------------------------------------------- */
 

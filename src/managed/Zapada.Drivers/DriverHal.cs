@@ -12,6 +12,10 @@ public static class DriverHal
     public const int IpcMessageAny = 0;
     public const int IpcMessageData = 2;
     public const int IpcMessageUser = 0x00010000;
+    public const int IpcMessageIrq = IpcMessageUser + 0x100;
+    public const int IpcErrEmpty = -3;
+
+    public const int IrqTimer = 0;
 
     [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int CreateChannel();
@@ -69,4 +73,28 @@ public static class DriverHal
 
     [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int BufferSize(int handle);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int AllocDmaBuffer(int size);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int FreeDmaBuffer(int handle);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferSize(int handle);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern long DmaBufferPhysicalAddress(int handle);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferRead32(int handle, int offset);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferWrite32(int handle, int offset, int value);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int SubscribeIrq(int irqNumber, int channelHandle);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int UnsubscribeIrq(int subscriptionHandle);
 }

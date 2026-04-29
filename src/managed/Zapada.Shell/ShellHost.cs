@@ -17,6 +17,9 @@ public static class ShellHost
         PrintMotd();
         Console.Write("[Shell] startup command smoke\n");
         RunBootSmokeCommand("mount");
+        RunBootSmokeCommand("drivers");
+        RunBootSmokeCommand("block");
+        RunBootSmokeCommand("partitions");
         RunBootSmokeCommand("ls /");
         RunBootSmokeCommand("ls /mnt/c");
         RunBootSmokeCommand("cat /etc/fstab");
@@ -72,6 +75,22 @@ public static class ShellHost
             return PrintMotd();
         if (TextEquals(line, commandStart, commandLength, "mount") || TextEquals(line, commandStart, commandLength, "mounts"))
             return Vfs.PrintMounts();
+        if (TextEquals(line, commandStart, commandLength, "drivers") || TextEquals(line, commandStart, commandLength, "lsmod"))
+            return Zapada.Drivers.DriverRegistry.PrintDrivers();
+        if (TextEquals(line, commandStart, commandLength, "drivers-full"))
+            return Zapada.Drivers.DriverRegistry.PrintDriversFull();
+        if (TextEquals(line, commandStart, commandLength, "services"))
+            return Zapada.Drivers.DriverRegistry.PrintServices();
+        if (TextEquals(line, commandStart, commandLength, "block") || TextEquals(line, commandStart, commandLength, "blocks") || TextEquals(line, commandStart, commandLength, "lsblk"))
+            return BlockDeviceRegistry.PrintDevices();
+        if (TextEquals(line, commandStart, commandLength, "partitions") || TextEquals(line, commandStart, commandLength, "parts"))
+            return PartitionRegistry.PrintPartitions();
+        if (TextEquals(line, commandStart, commandLength, "modprobe"))
+            return StartDriver(ReadArgumentOrDefault(line, argStart, argEnd, ""));
+        if (TextEquals(line, commandStart, commandLength, "driver"))
+            return ExecuteDriverCommand(ReadArgumentOrDefault(line, argStart, argEnd, ""));
+        if (TextEquals(line, commandStart, commandLength, "modprobe-plan"))
+            return Zapada.Drivers.DriverManager.PrintDependencyPlan();
         if (TextEquals(line, commandStart, commandLength, "pwd"))
             return PrintWorkingDirectory();
         if (TextEquals(line, commandStart, commandLength, "ls") || TextEquals(line, commandStart, commandLength, "dir"))
@@ -109,17 +128,21 @@ public static class ShellHost
             return;
         }
 
-        if (TextEquals(command, 0, command.Length, "ls /") || TextEquals(command, 0, command.Length, "ls /mnt/c"))
+        if (TextEquals(command, 0, command.Length, "drivers"))
         {
-            Console.Write("[Shell] listing ");
-            Console.Write(command.Substring(3, command.Length - 3));
-            Console.Write("\n");
+            Zapada.Drivers.DriverRegistry.PrintDrivers();
             return;
         }
 
-        if (TextEquals(command, 0, command.Length, "cat /etc/fstab"))
+        if (TextEquals(command, 0, command.Length, "block"))
         {
-            Console.Write("# Zapada filesystem table\n");
+            BlockDeviceRegistry.PrintDevices();
+            return;
+        }
+
+        if (TextEquals(command, 0, command.Length, "partitions"))
+        {
+            PartitionRegistry.PrintPartitions();
             return;
         }
 
@@ -132,6 +155,15 @@ public static class ShellHost
         Console.Write("  help              show this command list\n");
         Console.Write("  motd              print /etc/motd or the built-in message\n");
         Console.Write("  mount, mounts     list VFS mount points\n");
+        Console.Write("  drivers, lsmod    list loaded driver descriptors\n");
+        Console.Write("  drivers-full      list driver dependencies and bind targets\n");
+        Console.Write("  services          list registered service descriptors\n");
+        Console.Write("  block, lsblk      list registered block devices\n");
+        Console.Write("  partitions        list registered partitions\n");
+        Console.Write("  modprobe <driver> start a registered driver descriptor\n");
+        Console.Write("  driver tree       show dependency-provider graph\n");
+        Console.Write("  driver start <d>  start a registered driver descriptor\n");
+        Console.Write("  modprobe-plan     show dependency readiness\n");
         Console.Write("  pwd               print the current directory\n");
         Console.Write("  ls [path]         list a directory\n");
         Console.Write("  cat <path>        print a text file\n");
@@ -155,6 +187,59 @@ public static class ShellHost
     {
         Console.Write("/\n");
         return StorageStatus.Ok;
+    }
+
+    private static int StartDriver(string driverKey)
+    {
+        if (driverKey == null || driverKey.Length == 0)
+        {
+            Console.Write("[Shell] modprobe needs a driver key\n");
+            return StorageStatus.InvalidArgument;
+        }
+
+        int rc = Zapada.Drivers.DriverManager.Start(driverKey);
+        Console.Write("[Shell] modprobe ");
+        Console.Write(driverKey);
+        Console.Write(" rc=");
+        Console.Write(rc);
+        Console.Write("\n");
+        return rc == 0 ? StorageStatus.Ok : StorageStatus.NotFound;
+    }
+
+    private static int ExecuteDriverCommand(string args)
+    {
+        if (args == null || args.Length == 0)
+        {
+            Console.Write("[Shell] driver needs a subcommand\n");
+            return StorageStatus.InvalidArgument;
+        }
+
+        int length = args.Length;
+        int commandStart = SkipSpaces(args, 0, length);
+        if (commandStart >= length)
+        {
+            Console.Write("[Shell] driver needs a subcommand\n");
+            return StorageStatus.InvalidArgument;
+        }
+
+        int commandEnd = commandStart;
+        while (commandEnd < length && args[commandEnd] != ' ' && args[commandEnd] != '\t')
+            commandEnd++;
+
+        int commandLength = commandEnd - commandStart;
+        int argStart = SkipSpaces(args, commandEnd, length);
+        int argEnd = TrimRight(args, argStart, length);
+
+        if (TextEquals(args, commandStart, commandLength, "tree"))
+            return Zapada.Drivers.DriverManager.PrintDriverTree();
+
+        if (TextEquals(args, commandStart, commandLength, "start"))
+            return StartDriver(ReadArgumentOrDefault(args, argStart, argEnd, ""));
+
+        Console.Write("[Shell] unknown driver subcommand: ");
+        Console.Write(args.Substring(commandStart, commandLength));
+        Console.Write("\n");
+        return StorageStatus.NotFound;
     }
 
     private static int ListPath(string path)

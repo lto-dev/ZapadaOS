@@ -13,7 +13,7 @@ typedef uint32_t zaclr_frame_id;
 typedef uint32_t zaclr_assembly_id;
 typedef uint32_t zaclr_method_id;
 typedef uint32_t zaclr_type_id;
-typedef uint32_t zaclr_object_handle;
+typedef uintptr_t zaclr_object_handle;
 typedef uint32_t zaclr_app_domain_id;
 typedef uint32_t zaclr_handle_table_id;
 typedef uint32_t zaclr_security_context_id;

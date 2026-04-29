@@ -11,6 +11,12 @@ public static class DllMain
         DriverRegistry.Initialize();
         Console.Write("[Storage] DriverRegistry initialized\n");
 
+        BlockDeviceRegistry.Initialize();
+        Console.Write("[Storage] BlockDeviceRegistry initialized\n");
+
+        PartitionRegistry.Initialize();
+        Console.Write("[Storage] PartitionRegistry initialized\n");
+
         // Create RamFsVolume and initialize
         RamFsVolume ramfs = new RamFsVolume();
         ramfs.InitializeRamFs();

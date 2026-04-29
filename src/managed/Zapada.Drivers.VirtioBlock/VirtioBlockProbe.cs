@@ -113,7 +113,105 @@ internal static class VirtioBlockProbe
             return 0;
         }
 
+        int dmaSmoke = SmokeDmaBuffer();
+        if (dmaSmoke == 0)
+            return 0;
+
+        int irqSmoke = SmokeIrqChannel();
+        if (irqSmoke == 0)
+            return 0;
+
         Console.Write("[Gate] Phase-DriverHal\n");
+        return 1;
+    }
+
+    private static int SmokeIrqChannel()
+    {
+        int channel = DriverHal.CreateChannel();
+        if (channel <= 0)
+        {
+            Console.Write("[DriverHal] IRQ channel create failed\n");
+            return 0;
+        }
+
+        IrqSubscription subscription = IrqSubscription.Subscribe(DriverHal.IrqTimer, channel);
+        if (subscription == null)
+        {
+            Console.Write("[DriverHal] IRQ subscribe failed\n");
+            DriverHal.DestroyChannel(channel);
+            return 0;
+        }
+
+        byte[] receive = new byte[DriverHal.IpcMessagePayloadMax];
+        for (int attempt = 0; attempt < 4096; attempt++)
+        {
+            int rc = DriverHal.TryReceive(channel, DriverHal.IpcMessageIrq, receive);
+            if (rc == 0)
+            {
+                int messageType = ReadInt32(receive, 0);
+                int payloadLength = ReadInt32(receive, 8);
+                int irqNumber = ReadInt32(receive, 16);
+                int unsubscribeRc = subscription.Unsubscribe();
+                DriverHal.DestroyChannel(channel);
+
+                if (messageType != DriverHal.IpcMessageIrq || payloadLength < 16 || irqNumber != DriverHal.IrqTimer || unsubscribeRc != DriverHal.StatusSuccess)
+                {
+                    Console.Write("[DriverHal] IRQ event payload invalid\n");
+                    return 0;
+                }
+
+                return 1;
+            }
+
+            if (rc != DriverHal.IpcErrEmpty)
+            {
+                Console.Write("[DriverHal] IRQ receive failed rc=");
+                Console.Write(rc);
+                Console.Write("\n");
+                subscription.Unsubscribe();
+                DriverHal.DestroyChannel(channel);
+                return 0;
+            }
+        }
+
+        Console.Write("[DriverHal] IRQ timer event not observed\n");
+        subscription.Unsubscribe();
+        DriverHal.DestroyChannel(channel);
+        return 0;
+    }
+
+    private static int SmokeDmaBuffer()
+    {
+        DmaBuffer buffer = DmaBuffer.Allocate(4096);
+        if (buffer == null)
+        {
+            Console.Write("[DriverHal] DMA allocation failed\n");
+            return 0;
+        }
+
+        if (buffer.Size < 4096 || buffer.PhysicalAddress == 0 || (buffer.PhysicalAddress & 4095) != 0)
+        {
+            Console.Write("[DriverHal] DMA buffer metadata invalid\n");
+            buffer.Free();
+            return 0;
+        }
+
+        int writeRc = buffer.Write32(0, 0x5A504441);
+        int readValue = buffer.Read32(0);
+        int outOfBounds = buffer.Read32(buffer.Size);
+        if (writeRc != DriverHal.StatusSuccess || readValue != 0x5A504441 || outOfBounds != DriverHal.StatusInvalid)
+        {
+            Console.Write("[DriverHal] DMA buffer read/write failed\n");
+            buffer.Free();
+            return 0;
+        }
+
+        if (buffer.Free() != DriverHal.StatusSuccess)
+        {
+            Console.Write("[DriverHal] DMA free failed\n");
+            return 0;
+        }
+
         return 1;
     }
 
@@ -174,5 +272,13 @@ internal static class VirtioBlockProbe
 
         Console.Write("[DriverHal] VirtIO block MMIO BAR unavailable\n");
         return 0;
+    }
+
+    private static int ReadInt32(byte[] buffer, int offset)
+    {
+        return (buffer[offset] & 0xFF)
+             | ((buffer[offset + 1] & 0xFF) << 8)
+             | ((buffer[offset + 2] & 0xFF) << 16)
+             | ((buffer[offset + 3] & 0xFF) << 24);
     }
 }

@@ -5,6 +5,8 @@
 
 extern "C" {
 #include <kernel/ipc/ipc.h>
+#include <kernel/irq/irq_router.h>
+#include <kernel/mm/pmm.h>
 #ifdef ARCH_X86_64
 #include <kernel/arch/x86_64/paging.h>
 #include <kernel/arch/x86_64/pci.h>
@@ -27,6 +29,14 @@ namespace
         uint8_t bar_index;
     };
 
+    struct dma_buffer_slot
+    {
+        void* ptr;
+        uint64_t physical_address;
+        uint32_t size;
+        uint32_t frame_count;
+    };
+
     static const uint32_t max_buffer_slots = 16u;
     static buffer_slot s_buffer_slots[max_buffer_slots];
 
@@ -36,6 +46,10 @@ namespace
     static const uint32_t max_mmio_region_slots = 16u;
     static const uint32_t default_mmio_region_size = 0x1000u;
     static mmio_region_slot s_mmio_region_slots[max_mmio_region_slots];
+
+    static const uint32_t dma_frame_size = 4096u;
+    static const uint32_t max_dma_buffer_slots = 16u;
+    static dma_buffer_slot s_dma_buffer_slots[max_dma_buffer_slots];
 
     static int32_t alloc_buffer_slot(void* ptr, uint32_t size)
     {
@@ -97,6 +111,55 @@ namespace
     }
 
     static int validate_mmio_access(mmio_region_slot* slot, int32_t offset)
+    {
+        if (slot == nullptr || offset < 0 || ((uint32_t)offset & 3u) != 0u)
+        {
+            return 0;
+        }
+
+        uint32_t access_offset = (uint32_t)offset;
+        if (access_offset > slot->size || slot->size - access_offset < 4u)
+        {
+            return 0;
+        }
+
+        return 1;
+    }
+
+    static int32_t alloc_dma_buffer_slot(void* ptr, uint64_t physical_address, uint32_t size, uint32_t frame_count)
+    {
+        if (ptr == nullptr || physical_address == 0u || size == 0u || frame_count == 0u)
+        {
+            return driver_hal_status_invalid;
+        }
+
+        for (uint32_t i = 0u; i < max_dma_buffer_slots; i++)
+        {
+            if (s_dma_buffer_slots[i].ptr == nullptr)
+            {
+                s_dma_buffer_slots[i].ptr = ptr;
+                s_dma_buffer_slots[i].physical_address = physical_address;
+                s_dma_buffer_slots[i].size = size;
+                s_dma_buffer_slots[i].frame_count = frame_count;
+                return (int32_t)(i + 1u);
+            }
+        }
+
+        return driver_hal_status_invalid;
+    }
+
+    static dma_buffer_slot* get_dma_buffer_slot(int32_t handle)
+    {
+        if (handle <= 0 || (uint32_t)handle > max_dma_buffer_slots)
+        {
+            return nullptr;
+        }
+
+        dma_buffer_slot* slot = &s_dma_buffer_slots[(uint32_t)handle - 1u];
+        return slot->ptr != nullptr ? slot : nullptr;
+    }
+
+    static int validate_dma_access(dma_buffer_slot* slot, int32_t offset)
     {
         if (slot == nullptr || offset < 0 || ((uint32_t)offset & 3u) != 0u)
         {
@@ -210,7 +273,10 @@ namespace
 
 struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::CreateChannel___STATIC__I4(struct zaclr_native_call_frame& frame)
 {
-    return zaclr_native_call_frame_set_i4(&frame, (int32_t)ipc_channel_create());
+    uint64_t irq_state = irq_router_enter_critical();
+    int32_t handle = (int32_t)ipc_channel_create();
+    irq_router_leave_critical(irq_state);
+    return zaclr_native_call_frame_set_i4(&frame, handle);
 }
 
 struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::DestroyChannel___STATIC__I4__I4(struct zaclr_native_call_frame& frame)
@@ -219,7 +285,10 @@ struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::DestroyChannel___
     struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
     if (status.status != ZACLR_STATUS_OK) return status;
 
-    return zaclr_native_call_frame_set_i4(&frame, (int32_t)ipc_channel_destroy((ipc_handle_t)handle));
+    uint64_t irq_state = irq_router_enter_critical();
+    int32_t rc = (int32_t)ipc_channel_destroy((ipc_handle_t)handle);
+    irq_router_leave_critical(irq_state);
+    return zaclr_native_call_frame_set_i4(&frame, rc);
 }
 
 struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::TrySend___STATIC__I4__I4__I4__SZARRAY_U1__I4(struct zaclr_native_call_frame& frame)
@@ -254,7 +323,10 @@ struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::TrySend___STATIC_
     kernel_memset(message.payload, 0, IPC_MSG_PAYLOAD_MAX);
     kernel_memcpy(message.payload, zaclr_array_data_const(payload), (uint32_t)length);
 
-    return zaclr_native_call_frame_set_i4(&frame, (int32_t)ipc_trysend((ipc_handle_t)handle, &message));
+    uint64_t irq_state = irq_router_enter_critical();
+    int32_t rc = (int32_t)ipc_trysend((ipc_handle_t)handle, &message);
+    irq_router_leave_critical(irq_state);
+    return zaclr_native_call_frame_set_i4(&frame, rc);
 }
 
 struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::TryReceive___STATIC__I4__I4__I4__SZARRAY_U1(struct zaclr_native_call_frame& frame)
@@ -276,7 +348,9 @@ struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::TryReceive___STAT
         return zaclr_native_call_frame_set_i4(&frame, IPC_ERR_INVAL);
     }
 
+    uint64_t irq_state = irq_router_enter_critical();
     int32_t rc = (int32_t)ipc_tryrecv((ipc_handle_t)handle, (uint32_t)type_filter, &message);
+    irq_router_leave_critical(irq_state);
     if (rc == IPC_OK)
     {
         struct zaclr_array_desc* mutable_payload = (struct zaclr_array_desc*)payload;
@@ -288,6 +362,33 @@ struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::TryReceive___STAT
     }
 
     return zaclr_native_call_frame_set_i4(&frame, rc);
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::SubscribeIrq___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t irq_number;
+    int32_t channel_handle;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &irq_number);
+    if (status.status != ZACLR_STATUS_OK) return status;
+    status = zaclr_native_call_frame_arg_i4(&frame, 1u, &channel_handle);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    if (irq_number < 0 || channel_handle <= 0)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, driver_hal_status_invalid);
+    }
+
+    int32_t handle = irq_router_subscribe((uint32_t)irq_number, (ipc_handle_t)channel_handle);
+    return zaclr_native_call_frame_set_i4(&frame, handle);
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::UnsubscribeIrq___STATIC__I4__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t subscription_handle;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &subscription_handle);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    return zaclr_native_call_frame_set_i4(&frame, irq_router_unsubscribe(subscription_handle));
 }
 
 struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::PciFindDevice___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame)
@@ -676,4 +777,126 @@ struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::BufferSize___STAT
 
     buffer_slot* slot = get_buffer_slot(handle);
     return zaclr_native_call_frame_set_i4(&frame, slot != nullptr ? (int32_t)slot->size : -1);
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::AllocDmaBuffer___STATIC__I4__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t size;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &size);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    if (size <= 0)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, driver_hal_status_invalid);
+    }
+
+    uint32_t frame_count = ((uint32_t)size + dma_frame_size - 1u) / dma_frame_size;
+    void* ptr = pmm_alloc_contiguous(frame_count);
+    if (ptr == nullptr)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, driver_hal_status_invalid);
+    }
+
+    uint32_t actual_size = frame_count * dma_frame_size;
+    kernel_memset(ptr, 0, actual_size);
+    int32_t handle = alloc_dma_buffer_slot(ptr, (uint64_t)(uintptr_t)ptr, actual_size, frame_count);
+    if (handle < 0)
+    {
+        for (uint32_t i = 0u; i < frame_count; i++)
+        {
+            pmm_free_frame((void*)((uintptr_t)ptr + ((uintptr_t)i * dma_frame_size)));
+        }
+
+        return zaclr_native_call_frame_set_i4(&frame, driver_hal_status_invalid);
+    }
+
+    return zaclr_native_call_frame_set_i4(&frame, handle);
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::FreeDmaBuffer___STATIC__I4__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t handle;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    dma_buffer_slot* slot = get_dma_buffer_slot(handle);
+    if (slot == nullptr)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, driver_hal_status_invalid);
+    }
+
+    void* ptr = slot->ptr;
+    uint32_t frame_count = slot->frame_count;
+    for (uint32_t i = 0u; i < frame_count; i++)
+    {
+        pmm_free_frame((void*)((uintptr_t)ptr + ((uintptr_t)i * dma_frame_size)));
+    }
+
+    slot->ptr = nullptr;
+    slot->physical_address = 0u;
+    slot->size = 0u;
+    slot->frame_count = 0u;
+    return zaclr_native_call_frame_set_i4(&frame, 0);
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::DmaBufferSize___STATIC__I4__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t handle;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    dma_buffer_slot* slot = get_dma_buffer_slot(handle);
+    return zaclr_native_call_frame_set_i4(&frame, slot != nullptr ? (int32_t)slot->size : driver_hal_status_invalid);
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::DmaBufferPhysicalAddress___STATIC__I8__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t handle;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    dma_buffer_slot* slot = get_dma_buffer_slot(handle);
+    return zaclr_native_call_frame_set_i8(&frame, slot != nullptr ? (int64_t)slot->physical_address : (int64_t)driver_hal_status_invalid);
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::DmaBufferRead32___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t handle;
+    int32_t offset;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
+    if (status.status != ZACLR_STATUS_OK) return status;
+    status = zaclr_native_call_frame_arg_i4(&frame, 1u, &offset);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    dma_buffer_slot* slot = get_dma_buffer_slot(handle);
+    if (!validate_dma_access(slot, offset))
+    {
+        return zaclr_native_call_frame_set_i4(&frame, driver_hal_status_invalid);
+    }
+
+    uint32_t* data = (uint32_t*)((uintptr_t)slot->ptr + (uint32_t)offset);
+    return zaclr_native_call_frame_set_i4(&frame, (int32_t)(*data));
+}
+
+struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::DmaBufferWrite32___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t handle;
+    int32_t offset;
+    int32_t value;
+    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
+    if (status.status != ZACLR_STATUS_OK) return status;
+    status = zaclr_native_call_frame_arg_i4(&frame, 1u, &offset);
+    if (status.status != ZACLR_STATUS_OK) return status;
+    status = zaclr_native_call_frame_arg_i4(&frame, 2u, &value);
+    if (status.status != ZACLR_STATUS_OK) return status;
+
+    dma_buffer_slot* slot = get_dma_buffer_slot(handle);
+    if (!validate_dma_access(slot, offset))
+    {
+        return zaclr_native_call_frame_set_i4(&frame, driver_hal_status_invalid);
+    }
+
+    uint32_t* data = (uint32_t*)((uintptr_t)slot->ptr + (uint32_t)offset);
+    *data = (uint32_t)value;
+    return zaclr_native_call_frame_set_i4(&frame, 0);
 }

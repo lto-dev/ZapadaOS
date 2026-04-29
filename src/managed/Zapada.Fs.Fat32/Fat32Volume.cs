@@ -13,12 +13,12 @@ internal sealed class Fat32Volume : MountedVolume
     private const int MaxTokens = 8;
     private const int MaxNodes = 64;
 
-    private int _partLba;
     private int _bps;
     private int _spc;
     private int _fatStart;
     private int _dataStart;
     private int _rootCluster;
+    private PartitionView _partition = null!;
 
     private bool[] _nodeUsed = null!;
     private int[] _nodeFirstCluster = null!;
@@ -41,10 +41,33 @@ internal sealed class Fat32Volume : MountedVolume
 
     public int Initialize(int partLba)
     {
-        _partLba = partLba;
+        if (partLba < 0)
+            return StorageStatus.InvalidArgument;
 
+        BlockDevice device = BlockDeviceRegistry.FindByName("vda");
+        if (device == null)
+            return StorageStatus.NotMounted;
+
+        BlockDeviceInfo info = device.GetInfo();
+        long sectorCount = info == null ? 0 : info.SectorCount - partLba;
+        if (sectorCount <= 0)
+            sectorCount = 2147483647L - partLba;
+        if (sectorCount <= 0)
+            return StorageStatus.InvalidArgument;
+
+        BlockDevicePartitionView partition = new BlockDevicePartitionView();
+        partition.Initialize(device, "vda-fat32", (long)partLba, sectorCount, 2);
+        return Initialize(partition);
+    }
+
+    public int Initialize(PartitionView partition)
+    {
+        if (partition == null)
+            return StorageStatus.InvalidArgument;
+
+        _partition = partition;
         int[] bpb = new int[128];
-        if (Zapada.BlockDev.ReadSector((long)partLba, 1, bpb) != 0)
+        if (ReadSector(0, bpb) != StorageStatus.Ok)
             return StorageStatus.IoError;
 
         int bps = BufHelper.GetWord(bpb, 11);
@@ -67,7 +90,7 @@ internal sealed class Fat32Volume : MountedVolume
 
         _bps = bps;
         _spc = spc;
-        _fatStart = partLba + reserved;
+        _fatStart = reserved;
         _dataStart = _fatStart + fatCount * fatSize;
         _rootCluster = rootCluster;
 
@@ -214,7 +237,7 @@ internal sealed class Fat32Volume : MountedVolume
             int byteInSector = clusterOffset % _bps;
             int lba = ClusterToLba(cluster) + sectorInCluster;
 
-            if (Zapada.BlockDev.ReadSector((long)lba, 1, secBuf) != 0)
+            if (ReadSector(lba, secBuf) != StorageStatus.Ok)
                 return written > 0 ? written : StorageStatus.IoError;
 
             int available = _bps - byteInSector;
@@ -302,7 +325,7 @@ internal sealed class Fat32Volume : MountedVolume
             int clusterLba = ClusterToLba(cluster);
             for (int sec = 0; sec < _spc; sec++)
             {
-                if (Zapada.BlockDev.ReadSector((long)(clusterLba + sec), 1, secBuf) != 0)
+                if (ReadSector(clusterLba + sec, secBuf) != StorageStatus.Ok)
                     return StorageStatus.IoError;
 
                 for (int ent = 0; ent < DirEntriesPerSector; ent++)
@@ -454,7 +477,7 @@ internal sealed class Fat32Volume : MountedVolume
             int clusterLba = ClusterToLba(cluster);
             for (int sec = 0; sec < _spc; sec++)
             {
-                if (Zapada.BlockDev.ReadSector((long)(clusterLba + sec), 1, secBuf) != 0)
+                if (ReadSector(clusterLba + sec, secBuf) != StorageStatus.Ok)
                     return StorageStatus.IoError;
 
                 for (int ent = 0; ent < DirEntriesPerSector; ent++)
@@ -637,9 +660,30 @@ internal sealed class Fat32Volume : MountedVolume
         int byteOff = cluster * 4;
         int fatSec = _fatStart + (byteOff / _bps);
         int inSec = byteOff % _bps;
-        if (Zapada.BlockDev.ReadSector((long)fatSec, 1, secBuf) != 0)
+        if (ReadSector(fatSec, secBuf) != StorageStatus.Ok)
             return -1;
         return BufHelper.GetDword(secBuf, inSec) & 0x0FFFFFFF;
+    }
+
+    private int ReadSector(int lba, int[] secBuf)
+    {
+        if (_partition == null || secBuf == null || lba < 0)
+            return StorageStatus.InvalidArgument;
+
+        byte[] sector = new byte[512];
+        int rc = _partition.ReadSectors((long)lba, 1, sector, 0);
+        if (rc < 0)
+            return rc;
+        if (rc != 1)
+            return StorageStatus.IoError;
+
+        for (int i = 0; i < 128; i++)
+            secBuf[i] = 0;
+
+        for (int i = 0; i < 512; i++)
+            secBuf[i / 4] = secBuf[i / 4] | ((sector[i] & 0xFF) << ((i & 3) << 3));
+
+        return StorageStatus.Ok;
     }
 
     private bool IsEoc(int entry)

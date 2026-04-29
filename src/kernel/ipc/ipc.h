@@ -133,6 +133,12 @@ ipc_handle_t ipc_channel_create(void);
 ipc_result_t ipc_channel_destroy(ipc_handle_t h);
 
 /*
+ * ipc_channel_is_open - validate that a channel handle currently names an
+ * open channel without mutating channel state.
+ */
+bool ipc_channel_is_open(ipc_handle_t h);
+
+/*
  * ipc_trysend - non-blocking: copy msg into the channel ring buffer.
  *
  * Returns:

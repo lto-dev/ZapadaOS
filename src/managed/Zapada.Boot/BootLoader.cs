@@ -81,6 +81,9 @@ namespace Zapada.Boot
                 Console.Write("[Boot] Storage Initialize failed\n");
             }
 
+            Zapada.Drivers.DriverRegistry.Initialize();
+            RegisterKnownDriverDescriptors();
+
             // Phase 3: wire bootstrap RamFs root into VFS through cross-assembly
             // object reference flow (Boot -> Storage -> VFS).
             int vfsBootstrap = Vfs.Initialize();
@@ -113,6 +116,11 @@ namespace Zapada.Boot
             if (Zapada.Drivers.DllMain.Initialize() == 0)
             {
                 Console.Write("[Boot] VBLK Initialize failed\n");
+                Zapada.Drivers.DriverRegistry.SetState("virtio-blk", Zapada.Drivers.DriverState.Failed);
+            }
+            else
+            {
+                Zapada.Drivers.DriverRegistry.SetState("virtio-blk", Zapada.Drivers.DriverState.Started);
             }
 
             /* ------------------------------------------------------------ */
@@ -123,6 +131,11 @@ namespace Zapada.Boot
             if (Zapada.Fs.DllMain.Initialize() == 0)
             {
                 Console.Write("[Boot] GPT Initialize failed\n");
+                Zapada.Drivers.DriverRegistry.SetState("gpt", Zapada.Drivers.DriverState.Failed);
+            }
+            else
+            {
+                Zapada.Drivers.DriverRegistry.SetState("gpt", Zapada.Drivers.DriverState.Started);
             }
 
             /* ------------------------------------------------------------ */
@@ -133,6 +146,11 @@ namespace Zapada.Boot
             if (Zapada.Fs.Fat32.DllMain.Initialize() == 0)
             {
                 Console.Write("[Boot] FAT32 Initialize failed\n");
+                Zapada.Drivers.DriverRegistry.SetState("fat32", Zapada.Drivers.DriverState.Failed);
+            }
+            else
+            {
+                Zapada.Drivers.DriverRegistry.SetState("fat32", Zapada.Drivers.DriverState.Started);
             }
 
             /* ------------------------------------------------------------ */
@@ -143,6 +161,11 @@ namespace Zapada.Boot
             if (Zapada.Fs.Ext4.DllMain.Initialize() == 0)
             {
                 Console.Write("[Boot] Ext4 Initialize failed\n");
+                Zapada.Drivers.DriverRegistry.SetState("ext4", Zapada.Drivers.DriverState.Failed);
+            }
+            else
+            {
+                Zapada.Drivers.DriverRegistry.SetState("ext4", Zapada.Drivers.DriverState.Started);
             }
 
             /* ------------------------------------------------------------ */
@@ -153,6 +176,23 @@ namespace Zapada.Boot
             if (Zapada.Fs.Vfs.DllMain.Initialize() == 0)
             {
                 Console.Write("[Boot] VFS Initialize failed\n");
+                Zapada.Drivers.DriverRegistry.SetState("vfs", Zapada.Drivers.DriverState.Failed);
+            }
+            else
+            {
+                Zapada.Drivers.DriverRegistry.SetState("vfs", Zapada.Drivers.DriverState.Started);
+            }
+
+            int dependencyFailures = Zapada.Drivers.DriverManager.ProbeDependencies();
+            if (dependencyFailures == 0)
+            {
+                Console.Write("[Gate] Phase-DriverGraph\n");
+            }
+            else
+            {
+                Console.Write("[Boot] Driver dependency failures= ");
+                Console.Write(dependencyFailures);
+                Console.Write("\n");
             }
 
             MountPersistentRootAndCompatibilityVolume();
@@ -163,17 +203,110 @@ namespace Zapada.Boot
                 Console.Write("[Boot] Shell startup failed rc=");
                 Console.Write(shellRc);
                 Console.Write("\n");
+                Zapada.Drivers.DriverRegistry.SetState("shell", Zapada.Drivers.DriverState.Failed);
+            }
+            else
+            {
+                Console.Write("[Boot] Shell startup completed\n");
+                Zapada.Drivers.DriverRegistry.SetState("shell", Zapada.Drivers.DriverState.Started);
             }
 
             /* Gate D: boot sequence complete. */
             Console.Write("[Gate] GateD\n");
         }
 
+        private static void RegisterKnownDriverDescriptors()
+        {
+            Zapada.Drivers.DriverRegistry.Register(
+                "conformance",
+                "Zapada.Conformance",
+                "diagnostics.conformance",
+                "",
+                "boot:test",
+                Zapada.Drivers.DriverState.Started);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "storage",
+                "Zapada.Storage",
+                "storage.core,filesystem.ramfs,volume-probes",
+                "",
+                "boot:initramfs",
+                Zapada.Drivers.DriverState.Started);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "hello-test",
+                "Zapada.Test.Hello",
+                "diagnostics.hello",
+                "Zapada.Storage",
+                "boot:test",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "virtio-blk",
+                "Zapada.Drivers.VirtioBlock",
+                "block.device:vda,hal.smoke",
+                "Zapada.Drivers.Hal",
+                "pci:1af4:1001,pci:1af4:1042",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "gpt",
+                "Zapada.Fs.Gpt",
+                "partition.table:gpt",
+                "Zapada.Storage.PartitionView",
+                "block:*",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "fat32",
+                "Zapada.Fs.Fat32",
+                "filesystem:fat32",
+                "Zapada.Storage.PartitionView",
+                "partition:gpt",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "ext4",
+                "Zapada.Fs.Ext4",
+                "filesystem:ext4",
+                "Zapada.Storage.PartitionView",
+                "partition:gpt",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "vfs",
+                "Zapada.Fs.Vfs",
+                "namespace:vfs",
+                "Zapada.Storage.MountedVolume",
+                "mount:*",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "shell",
+                "Zapada.Shell",
+                "shell.console",
+                "Zapada.Fs.Vfs",
+                "console",
+                Zapada.Drivers.DriverState.Loaded);
+        }
+
         private static void MountPersistentRootAndCompatibilityVolume()
         {
             Console.Write("[Boot] Persistent storage: scanning...\n");
 
-            GptPartitionInfo rootInfo = Gpt.FindPartitionInfoByName("ZAPADA_BOOT");
+            BlockDevice bootDevice = EnsureBootBlockDevice(0);
+            if (bootDevice == null)
+            {
+                Console.Write("[Boot] no boot block device registered\n");
+                return;
+            }
+
+            int partitionCount = PartitionScanner.ScanAllBlockDevices();
+            Console.Write("[Storage] partitions discovered: ");
+            Console.Write(partitionCount);
+            Console.Write("\n");
+
+            PartitionInfo rootInfo = PartitionRegistry.FindByLabel("ZAPADA_BOOT");
             if (rootInfo == null)
             {
                 Console.Write("[Boot] ZAPADA_BOOT not found (non-fatal)\n");
@@ -184,8 +317,12 @@ namespace Zapada.Boot
             Console.Write((int)rootInfo.StartLba);
             Console.Write("\n");
 
-            VirtioPartitionView rootPartition = new VirtioPartitionView();
-            rootPartition.Initialize(rootInfo.StartLba, rootInfo.SectorCount, 2);
+            BlockDevicePartitionView rootPartition = PartitionRegistry.CreateView(rootInfo);
+            if (rootPartition == null)
+            {
+                Console.Write("[Boot] root partition view failed\n");
+                return;
+            }
 
             VolumeProbe rootProbe = DriverRegistry.FindBestProbe(rootPartition);
             if (rootProbe == null)
@@ -217,6 +354,34 @@ namespace Zapada.Boot
 
             VerifyExt4RootPayloads();
             MountConfiguredFstabVolumes();
+        }
+
+        private static BlockDevice EnsureBootBlockDevice(long minimumSectorCount)
+        {
+            BlockDevice device = BlockDeviceRegistry.FindByName("vda");
+            if (device != null)
+                return device;
+
+            long sectorCount = Zapada.BlockDev.SectorCount();
+            if (sectorCount <= 0)
+                sectorCount = minimumSectorCount;
+            if (sectorCount < 0)
+                sectorCount = 0;
+
+            NativeBridgeBlockDevice bridge = new NativeBridgeBlockDevice("vda", "virtio-blk", 512, sectorCount);
+            int rc = BlockDeviceRegistry.Register(bridge);
+            if (rc == StorageStatus.Ok || rc == StorageStatus.AlreadyExists)
+            {
+                Zapada.Drivers.DriverRegistry.AddUse("virtio-blk");
+                Console.Write("[Storage] block registered: vda native-bridge\n");
+                Console.Write("[Gate] Phase-BlockRegistry\n");
+                return BlockDeviceRegistry.FindByName("vda");
+            }
+
+            Console.Write("[Storage] block register failed rc=");
+            Console.Write(rc);
+            Console.Write("\n");
+            return null;
         }
 
         private static void VerifyExt4RootPayloads()
@@ -401,15 +566,26 @@ namespace Zapada.Boot
             Console.Write(fsType);
             Console.Write("\n");
 
-            GptPartitionInfo info = Gpt.FindPartitionInfoByName(label);
+            BlockDevice bootDevice = BlockDeviceRegistry.FindByName("vda");
+            if (bootDevice == null)
+            {
+                Console.Write("[Boot] fstab block device missing\n");
+                return;
+            }
+
+            PartitionInfo info = PartitionRegistry.FindByLabel(label);
             if (info == null)
             {
                 Console.Write("[Boot] fstab partition not found\n");
                 return;
             }
 
-            VirtioPartitionView fstabPartition = new VirtioPartitionView();
-            fstabPartition.Initialize(info.StartLba, info.SectorCount, 2);
+            BlockDevicePartitionView fstabPartition = PartitionRegistry.CreateView(info);
+            if (fstabPartition == null)
+            {
+                Console.Write("[Boot] fstab partition view failed\n");
+                return;
+            }
 
             string driverKey = MapFstabTypeToDriverKey(fsType);
             MountedVolume fstabVolume = MountKnownFstabVolume(fstabPartition, driverKey);

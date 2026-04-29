@@ -16,6 +16,7 @@
  */
 
 #include <kernel/sched/timer.h>
+#include <kernel/irq/irq_router.h>
 #include <kernel/console.h>
 #include <kernel/types.h>
 
@@ -90,6 +91,8 @@ void timer_tick_handler(void)
     if (s_tick_fn != NULL) {
         s_tick_fn();
     }
+
+    irq_router_publish(IRQ_ROUTER_TIMER_IRQ);
 }
 
 /* ---------------------------------------------------------------------- */

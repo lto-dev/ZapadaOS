@@ -27,6 +27,16 @@ struct zaclr_native_Zapada_Drivers_Hal_DriverHal
     static struct zaclr_result AllocBuffer___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result FreeBuffer___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result BufferSize___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
+
+    static struct zaclr_result AllocDmaBuffer___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result FreeDmaBuffer___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferSize___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferPhysicalAddress___STATIC__I8__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferRead32___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferWrite32___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame);
+
+    static struct zaclr_result SubscribeIrq___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result UnsubscribeIrq___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
 };
 
 #endif /* ZACLR_NATIVE_ZAPADA_DRIVERS_HAL_DRIVERHAL_H */

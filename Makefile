@@ -351,6 +351,7 @@ C_SOURCES_AA64 := \
     $(SRC_DIR)/kernel/sched/kstack.c                    \
     $(SRC_DIR)/kernel/syscall/syscall.c                 \
     $(SRC_DIR)/kernel/ipc/ipc.c                         \
+    $(SRC_DIR)/kernel/irq/irq_router.c                  \
     $(SRC_DIR)/kernel/arch/aarch64/virtio_mmio.c        \
     $(SRC_DIR)/kernel/drivers/virtio.c                  \
     $(SRC_DIR)/kernel/drivers/virtio_blk.c              \
@@ -454,6 +455,7 @@ C_SOURCES := \
     $(SRC_DIR)/kernel/sched/kstack.c                \
     $(SRC_DIR)/kernel/syscall/syscall.c             \
     $(SRC_DIR)/kernel/ipc/ipc.c                     \
+    $(SRC_DIR)/kernel/irq/irq_router.c              \
     $(SRC_DIR)/kernel/arch/x86_64/pci.c             \
     $(SRC_DIR)/kernel/drivers/virtio.c               \
     $(SRC_DIR)/kernel/drivers/virtio_blk.c           \

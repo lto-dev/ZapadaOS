@@ -1,6 +1,7 @@
 #include "zaclr_native_Zapada_BlockDev.h"
 
 #include <kernel/support/kernel_memory.h>
+#include <kernel/drivers/block.h>
 #include <kernel/zaclr/heap/zaclr_array.h>
 
 extern "C" int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj);
@@ -43,6 +44,16 @@ namespace
         kernel_free(legacy_array);
         return zaclr_native_call_frame_set_i4(&frame, rc);
     }
+}
+
+struct zaclr_result zaclr_native_Zapada_BlockDev::SectorCount___STATIC__I8(struct zaclr_native_call_frame& frame)
+{
+    if (g_block_vda.present == 0)
+    {
+        return zaclr_native_call_frame_set_i8(&frame, 0);
+    }
+
+    return zaclr_native_call_frame_set_i8(&frame, (int64_t)g_block_vda.sector_count);
 }
 
 struct zaclr_result zaclr_native_Zapada_BlockDev::ReadSector___STATIC__I4__I8__I4__SZARRAY_I4(struct zaclr_native_call_frame& frame)

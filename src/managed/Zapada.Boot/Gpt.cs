@@ -40,6 +40,7 @@
  */
 
 using System;
+using Zapada.Storage;
 
 namespace Zapada.Boot
 {
@@ -93,6 +94,27 @@ namespace Zapada.Boot
                 && BufHelper.GetByte(buf, nameOff + i * 2 + 1) == 0;
         }
 
+        private static int ReadDeviceSector(BlockDevice device, long lba, int[] buffer)
+        {
+            if (device == null || buffer == null || lba < 0)
+                return StorageStatus.InvalidArgument;
+
+            byte[] sector = new byte[512];
+            int rc = device.ReadSectors(lba, 1, sector, 0);
+            if (rc < 0)
+                return rc;
+            if (rc != 1)
+                return StorageStatus.IoError;
+
+            for (int i = 0; i < 128; i++)
+                buffer[i] = 0;
+
+            for (int i = 0; i < 512; i++)
+                buffer[i / 4] = buffer[i / 4] | ((sector[i] & 0xFF) << ((i & 3) << 3));
+
+            return StorageStatus.Ok;
+        }
+
         /* ------------------------------------------------------------------
          * FindPartitionByName
          *
@@ -113,14 +135,26 @@ namespace Zapada.Boot
 
         internal static GptPartitionInfo FindPartitionInfoByName(string partitionName)
         {
+            BlockDevice device = BlockDeviceRegistry.FindByName("vda");
+            if (device == null)
+            {
+                long sectorCount = Zapada.BlockDev.SectorCount();
+                device = new NativeBridgeBlockDevice("vda", "virtio-blk", 512, sectorCount);
+            }
+
+            return FindPartitionInfoByName(device, partitionName);
+        }
+
+        internal static GptPartitionInfo FindPartitionInfoByName(BlockDevice device, string partitionName)
+        {
             int[] hdrBuf = new int[128];   /* 512 bytes / 4 = 128 int32 elements */
             int[] entBuf = new int[128];
 
-            if (partitionName == null || partitionName.Length == 0)
+            if (device == null || partitionName == null || partitionName.Length == 0)
                 return null;
 
             /* Read GPT header at LBA 1. */
-            if (Zapada.BlockDev.ReadSector(1L, 1, hdrBuf) != 0)
+            if (ReadDeviceSector(device, 1L, hdrBuf) != StorageStatus.Ok)
             {
                 Console.Write("[Gpt] I/O error reading LBA 1\n");
                 return null;
@@ -165,7 +199,7 @@ namespace Zapada.Boot
                 if (entInSec == 0)
                 {
                     long secLba = ptLba + (long)secIdx;
-                    if (Zapada.BlockDev.ReadSector(secLba, 1, entBuf) != 0)
+                    if (ReadDeviceSector(device, secLba, entBuf) != StorageStatus.Ok)
                     {
                         Console.Write("[Gpt] I/O error reading partition table\n");
                         return null;
