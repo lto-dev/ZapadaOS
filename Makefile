@@ -61,6 +61,7 @@ ZACLR_BUILD_DIR := build
 
 ENABLE_ZACLR := 1
 ENABLE_ZACLR_TESTS ?= 0
+KERNEL_CMDLINE ?=
 
 clr_core_or_fork = $(if $(wildcard $(CLR_FORK_DIR)/$(1)),$(CLR_FORK_DIR)/$(1),$(CLR_CORE_DIR)/$(1))
 
@@ -752,7 +753,27 @@ $(INITRAMFS_IMG): | $(BUILD_DIR)
 $(KERNEL_ISO): $(KERNEL_ELF) $(INITRAMFS_IMG) $(BOOT_GRUB)/grub.cfg | $(BUILD_DIR)
 	@cp $(KERNEL_ELF) $(ISOROOT_DIR)/boot/Zapada.elf
 	@cp $(INITRAMFS_IMG) $(ISOROOT_DIR)/boot/initramfs.cpio.gz
-	$(MKRESCUE) -o $@ $(ISOROOT_DIR)
+	@if [ -n "$(KERNEL_CMDLINE)" ]; then \
+		cp $(BOOT_GRUB)/grub.cfg $(BUILD_DIR)/grub.cfg.original; \
+		{ \
+			printf '%s\n' '# Zapada - generated smoke GRUB configuration'; \
+			printf '%s\n' 'set timeout=0'; \
+			printf '%s\n' 'set default=0'; \
+			printf '%s\n' 'set gfxmode=1024x768x32'; \
+			printf '%s\n' 'set gfxpayload=keep'; \
+			printf '%s\n' 'menuentry "Zapada OS - Stage 1.1" {'; \
+			printf '%s\n' '    multiboot2 /boot/Zapada.elf $(KERNEL_CMDLINE)'; \
+			printf '%s\n' '    module2 /boot/initramfs.cpio.gz initramfs'; \
+			printf '%s\n' '    boot'; \
+			printf '%s\n' '}'; \
+		} > $(BUILD_DIR)/grub.cfg.smoke; \
+		cp $(BUILD_DIR)/grub.cfg.smoke $(BOOT_GRUB)/grub.cfg; \
+		$(MKRESCUE) -o $@ $(ISOROOT_DIR); rc=$$?; \
+		cp $(BUILD_DIR)/grub.cfg.original $(BOOT_GRUB)/grub.cfg; \
+		exit $$rc; \
+	else \
+		$(MKRESCUE) -o $@ $(ISOROOT_DIR); \
+	fi
 	@echo "Bootable ISO: $@"
 
 # --------------------------------------------------------------------------

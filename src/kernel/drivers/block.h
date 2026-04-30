@@ -4,10 +4,8 @@
  * Block device descriptor.
  *
  * A block_device_t is a static descriptor for a discovered storage device.
- * Phase 3A supports exactly one device ("vda") backed by a VirtIO block
- * device.  All fields are populated during phase3a_part2_init().
- *
- * Phase 3.1 will replace the static array with a proper device registry.
+ * Native keeps a bounded early inventory for the compatibility bridge; managed
+ * code owns the higher-level BlockDeviceRegistry.
  */
 
 #ifndef ZAPADA_DRIVERS_BLOCK_H
@@ -17,6 +15,7 @@
 
 /* Maximum length of device name including NUL */
 #define BLOCK_DEV_NAME_MAX  8u
+#define BLOCK_DEV_MAX       4u
 
 /*
  * block_device_t - Descriptor for a single block device.
@@ -33,11 +32,10 @@ typedef struct {
     int      present;
 } block_device_t;
 
-/*
- * g_block_vda - The single Phase-3A VirtIO block device descriptor.
- * Defined in virtio_blk.c; zeroed until phase3a_part2_init() runs.
- */
+/* Compatibility descriptor for the first VirtIO block device. */
 extern block_device_t g_block_vda;
+extern block_device_t g_block_devices[BLOCK_DEV_MAX];
+extern uint32_t g_block_device_count;
 
 #endif /* ZAPADA_DRIVERS_BLOCK_H */
 

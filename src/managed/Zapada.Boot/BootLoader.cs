@@ -196,8 +196,25 @@ namespace Zapada.Boot
             }
 
             MountPersistentRootAndCompatibilityVolume();
+            MountDeviceNamespace();
+            MountProcNamespace();
 
-            int shellRc = ShellHost.RunBootShell();
+            string bootCommandLine = BootOptions.CommandLine();
+            Console.Write("[Boot] command line: ");
+            Console.Write(bootCommandLine);
+            Console.Write("\n");
+
+            int shellRc;
+            if (BootOptions.IsSmokeMode())
+            {
+                Console.Write("[Boot] shell mode: smoke\n");
+                shellRc = ShellHost.RunBootSmoke();
+            }
+            else
+            {
+                Console.Write("[Boot] shell mode: interactive\n");
+                shellRc = ShellHost.RunInteractive(-1);
+            }
             if (shellRc != StorageStatus.Ok)
             {
                 Console.Write("[Boot] Shell startup failed rc=");
@@ -231,6 +248,14 @@ namespace Zapada.Boot
                 "storage.core,filesystem.ramfs,volume-probes",
                 "",
                 "boot:initramfs",
+                Zapada.Drivers.DriverState.Started);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "entropy",
+                "Zapada.Storage",
+                "entropy.source,character.device:random",
+                "",
+                "boot:provisional",
                 Zapada.Drivers.DriverState.Started);
 
             Zapada.Drivers.DriverRegistry.Register(
@@ -294,7 +319,7 @@ namespace Zapada.Boot
         {
             Console.Write("[Boot] Persistent storage: scanning...\n");
 
-            BlockDevice bootDevice = EnsureBootBlockDevice(0);
+            BlockDevice bootDevice = EnsureNativeBlockDevices(0);
             if (bootDevice == null)
             {
                 Console.Write("[Boot] no boot block device registered\n");
@@ -356,32 +381,70 @@ namespace Zapada.Boot
             MountConfiguredFstabVolumes();
         }
 
-        private static BlockDevice EnsureBootBlockDevice(long minimumSectorCount)
+        private static BlockDevice EnsureNativeBlockDevices(long minimumSectorCount)
         {
-            BlockDevice device = BlockDeviceRegistry.FindByName("vda");
-            if (device != null)
-                return device;
+            BlockDevice existing = BlockDeviceRegistry.FindByName("vda");
+            if (existing != null)
+                return existing;
 
-            long sectorCount = Zapada.BlockDev.SectorCount();
-            if (sectorCount <= 0)
-                sectorCount = minimumSectorCount;
-            if (sectorCount < 0)
-                sectorCount = 0;
-
-            NativeBridgeBlockDevice bridge = new NativeBridgeBlockDevice("vda", "virtio-blk", 512, sectorCount);
-            int rc = BlockDeviceRegistry.Register(bridge);
-            if (rc == StorageStatus.Ok || rc == StorageStatus.AlreadyExists)
+            int nativeCount = Zapada.BlockDev.DeviceCount();
+            if (nativeCount <= 0)
             {
-                Zapada.Drivers.DriverRegistry.AddUse("virtio-blk");
-                Console.Write("[Storage] block registered: vda native-bridge\n");
+                long fallbackSectors = Zapada.BlockDev.SectorCount();
+                if (fallbackSectors <= 0)
+                    fallbackSectors = minimumSectorCount;
+                if (fallbackSectors < 0)
+                    fallbackSectors = 0;
+                if (fallbackSectors > 0)
+                    nativeCount = 1;
+            }
+
+            int registered = 0;
+            for (int i = 0; i < nativeCount; i++)
+            {
+                string name = NativeBlockDeviceName(i);
+                long sectorCount = Zapada.BlockDev.SectorCountForDevice(i);
+                if (i == 0 && sectorCount <= 0)
+                    sectorCount = Zapada.BlockDev.SectorCount();
+                if (sectorCount <= 0)
+                    sectorCount = minimumSectorCount;
+                if (sectorCount < 0)
+                    sectorCount = 0;
+
+                NativeBridgeBlockDevice bridge = new NativeBridgeBlockDevice(name, "virtio-blk", 512, sectorCount, i);
+                int rc = BlockDeviceRegistry.Register(bridge);
+                if (rc == StorageStatus.Ok || rc == StorageStatus.AlreadyExists)
+                {
+                    Zapada.Drivers.DriverRegistry.AddUse("virtio-blk");
+                    Console.Write("[Storage] block registered: ");
+                    Console.Write(name);
+                    Console.Write(" native-bridge\n");
+                    registered++;
+                }
+                else
+                {
+                    Console.Write("[Storage] block register failed rc=");
+                    Console.Write(rc);
+                    Console.Write("\n");
+                }
+            }
+
+            if (registered > 0)
+            {
                 Console.Write("[Gate] Phase-BlockRegistry\n");
                 return BlockDeviceRegistry.FindByName("vda");
             }
 
-            Console.Write("[Storage] block register failed rc=");
-            Console.Write(rc);
-            Console.Write("\n");
             return null;
+        }
+
+        private static string NativeBlockDeviceName(int index)
+        {
+            if (index == 0) return "vda";
+            if (index == 1) return "vdb";
+            if (index == 2) return "vdc";
+            if (index == 3) return "vdd";
+            return "vdx";
         }
 
         private static void VerifyExt4RootPayloads()
@@ -419,6 +482,94 @@ namespace Zapada.Boot
             int nr = Vfs.Read(fd, hdr, 0, 1);
             Vfs.Close(fd);
             return nr == 1 && hdr[0] == expected;
+        }
+
+        private static void MountDeviceNamespace()
+        {
+            RegisterDeviceNodes();
+
+            DevFsVolume devfs = new DevFsVolume();
+            int mountRc = Vfs.Mount("/dev", devfs);
+            if (mountRc < 0 && mountRc != StorageStatus.AlreadyExists)
+            {
+                Console.Write("[Boot] /dev mount failed rc=");
+                Console.Write(mountRc);
+                Console.Write("\n");
+                return;
+            }
+
+            Console.Write("[Boot] /dev mounted from DeviceRegistry\n");
+            Console.Write("[Gate] Phase-DevFs\n");
+        }
+
+        private static void RegisterDeviceNodes()
+        {
+            DeviceRegistry.Initialize();
+
+            RegisterStaticDeviceNode("/dev/null", "null", DeviceKind.Null, "char:null", "devfs", FileAccessIntent.ReadWrite, 0);
+            RegisterStaticDeviceNode("/dev/zero", "zero", DeviceKind.Zero, "char:zero", "devfs", FileAccessIntent.ReadOnly, 0);
+            RegisterStaticDeviceNode("/dev/console", "console", DeviceKind.Console, "console:system", "shell", FileAccessIntent.ReadWrite, 0);
+            EntropyService.Initialize((uint)BlockDeviceRegistry.Count(), (uint)PartitionRegistry.Count());
+            RegisterStaticDeviceNode("/dev/urandom", "urandom", DeviceKind.Random, "entropy:urandom", "entropy", FileAccessIntent.ReadOnly, 1);
+            RegisterStaticDeviceNode("/dev/random", "random", DeviceKind.Random, "entropy:random", "entropy", FileAccessIntent.ReadOnly, 2);
+
+            int blockDeviceCount = BlockDeviceRegistry.Count();
+            for (int i = 0; i < blockDeviceCount; i++)
+            {
+                BlockDevice device = BlockDeviceRegistry.Get(i);
+                if (device == null)
+                    continue;
+
+                BlockDeviceInfo info = device.GetInfo();
+                if (info == null || info.Name == null || info.Name.Length == 0)
+                    continue;
+
+                string path = string.Concat("/dev/", info.Name);
+                string serviceKey = string.Concat("block:", info.Name);
+                RegisterStaticDeviceNode(path, info.Name, DeviceKind.Block, serviceKey, "virtio-blk", FileAccessIntent.ReadWrite, i);
+            }
+
+            int partitionCount = PartitionRegistry.Count();
+            for (int i = 0; i < partitionCount; i++)
+            {
+                PartitionInfo partition = PartitionRegistry.Get(i);
+                if (partition == null)
+                    continue;
+
+                string path = string.Concat("/dev/", partition.Name);
+                string serviceKey = string.Concat("partition:", partition.Name);
+                RegisterStaticDeviceNode(path, partition.Name, DeviceKind.Block, serviceKey, "partition", FileAccessIntent.ReadWrite, i + 1);
+            }
+        }
+
+        private static void MountProcNamespace()
+        {
+            BootProcFsProvider provider = new BootProcFsProvider();
+            ProcFsVolume procfs = new ProcFsVolume(provider);
+            int mountRc = Vfs.Mount("/proc", procfs);
+            if (mountRc < 0 && mountRc != StorageStatus.AlreadyExists)
+            {
+                Console.Write("[Boot] /proc mount failed rc=");
+                Console.Write(mountRc);
+                Console.Write("\n");
+                return;
+            }
+
+            Console.Write("[Boot] /proc mounted from live registry snapshots\n");
+            Console.Write("[Gate] Phase-ProcFs\n");
+        }
+
+        private static void RegisterStaticDeviceNode(string path, string name, int kind, string serviceKey, string driverKey, int permissions, int targetHandle)
+        {
+            int rc = DeviceRegistry.RegisterNode(path, name, kind, serviceKey, driverKey, permissions, targetHandle);
+            if (rc != StorageStatus.Ok && rc != StorageStatus.AlreadyExists)
+            {
+                Console.Write("[Boot] device node register failed: ");
+                Console.Write(path);
+                Console.Write(" rc=");
+                Console.Write(rc);
+                Console.Write("\n");
+            }
         }
 
         private static void MountConfiguredFstabVolumes()
@@ -620,9 +771,19 @@ namespace Zapada.Boot
                 Console.Write("[Gate] Phase-Fat32Driver\n");
                 Console.Write("[Gate] Phase-Fat32MntC\n");
             }
+            else if (mountPath == "/mnt/d" && VerifyMZFile("/mnt/d/TEST.DLL"))
+            {
+                Console.Write("[Boot] second disk FAT32 read OK: MZ verified\n");
+                Console.Write("[Gate] Phase-Fat32MntD\n");
+                Console.Write("[Gate] Phase-MultiDiskStorage\n");
+            }
+            else if (mountPath == "/mnt/c" || mountPath == "/mnt/d")
+            {
+                Console.Write("[Boot] FAT32 VFS read failed on mounted TEST.DLL\n");
+            }
             else
             {
-                Console.Write("[Boot] FAT32 VFS read failed on /mnt/c/TEST.DLL\n");
+                Console.Write("[Boot] fstab mount verified without file smoke\n");
             }
         }
 

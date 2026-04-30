@@ -169,6 +169,7 @@ cat > "$TMP_FSTAB_FILE" <<'FSTAB'
 # <device>      <mountpoint> <type>  <options>
 LABEL=ZAPADA_BOOT /           ext4    ro
 LABEL=ZAPADA_DATA /mnt/c      vfat    ro
+LABEL=ZAPADA_SMOKE /mnt/d     vfat    ro
 FSTAB
 cat > "$TMP_MOTD_FILE" <<'MOTD'
 Welcome to Zapada.

@@ -2075,6 +2075,7 @@ static struct zaclr_result push_string_copy(struct zaclr_frame* frame,
 }
 
 static struct zaclr_result invoke_string_search_intrinsic(struct zaclr_frame* frame,
+                                                          const struct zaclr_method_desc* method,
                                                           zaclr_string_intrinsic_kind kind)
 {
     struct zaclr_stack_value value_arg = {};
@@ -2085,12 +2086,12 @@ static struct zaclr_result invoke_string_search_intrinsic(struct zaclr_frame* fr
     bool matches = false;
     struct zaclr_result result;
 
-    if (frame == NULL || frame->method == NULL)
+    if (frame == NULL || method == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_EXEC);
     }
 
-    if (frame->method->signature.parameter_count == 2u)
+    if (method->signature.parameter_count == 2u)
     {
         result = zaclr_eval_stack_pop(&frame->eval_stack, &ignored_comparison);
         if (result.status != ZACLR_STATUS_OK)
@@ -2389,13 +2390,14 @@ static struct zaclr_result invoke_string_indexof_char_intrinsic(struct zaclr_fra
 }
 
 static struct zaclr_result invoke_string_intrinsic(struct zaclr_frame* frame,
+                                                   const struct zaclr_method_desc* method,
                                                    zaclr_string_intrinsic_kind kind)
 {
     if (kind == zaclr_string_intrinsic_kind::starts_with
         || kind == zaclr_string_intrinsic_kind::ends_with
         || kind == zaclr_string_intrinsic_kind::contains)
     {
-        return invoke_string_search_intrinsic(frame, kind);
+        return invoke_string_search_intrinsic(frame, method, kind);
     }
 
     if (kind == zaclr_string_intrinsic_kind::compare)
@@ -4374,7 +4376,7 @@ extern "C" struct zaclr_result zaclr_try_invoke_intrinsic(struct zaclr_frame* fr
         zaclr_string_intrinsic_kind string_intrinsic_kind = zaclr_string_intrinsic_kind::none;
         if (try_get_string_runtime_intrinsic_kind(effective_type, method, &string_intrinsic_kind))
         {
-            return invoke_string_intrinsic(frame, string_intrinsic_kind);
+            return invoke_string_intrinsic(frame, method, string_intrinsic_kind);
         }
     }
 

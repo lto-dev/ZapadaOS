@@ -17,6 +17,9 @@ public static class DllMain
         PartitionRegistry.Initialize();
         Console.Write("[Storage] PartitionRegistry initialized\n");
 
+        DeviceRegistry.Initialize();
+        Console.Write("[Storage] DeviceRegistry initialized\n");
+
         // Create RamFsVolume and initialize
         RamFsVolume ramfs = new RamFsVolume();
         ramfs.InitializeRamFs();

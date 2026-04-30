@@ -71,6 +71,7 @@ void pci_dump_inventory(void);
  * For an I/O bar, strip bits [1:0]; for MMIO, strip bits [3:0].
  */
 int pci_virtio_blk_probe(uint32_t *bar0_out);
+int pci_virtio_blk_probe_nth(uint32_t target_index, uint32_t *bar0_out);
 
 int pci_virtio_blk_probe_modern(uint64_t *common_cfg_out,
                                 uint64_t *notify_cfg_out,

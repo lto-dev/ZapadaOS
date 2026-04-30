@@ -60,31 +60,61 @@
  * Global state — BSS, no heap
  * -------------------------------------------------------------------------- */
 
-virtio_dev_t  g_virtio_blk_dev;   /* Zero-initialised in BSS until probe */
-block_device_t g_block_vda;       /* Zero-initialised in BSS until probe */
+virtio_dev_t  g_virtio_blk_dev;   /* Compatibility alias for first probe */
+virtio_dev_t  g_virtio_blk_devs[BLOCK_DEV_MAX];
+block_device_t g_block_vda;       /* Compatibility descriptor for first probe */
+block_device_t g_block_devices[BLOCK_DEV_MAX];
+uint32_t g_block_device_count;
+
+static void virtio_blk_set_name(block_device_t *block, uint32_t index)
+{
+    if (block == (block_device_t *)0) {
+        return;
+    }
+
+    block->name[0] = 'v';
+    block->name[1] = 'd';
+    block->name[2] = (char)('a' + (char)index);
+    block->name[3] = '\0';
+}
+
+static const char *virtio_blk_transport_name(const virtio_dev_t *dev)
+{
+    if (dev == (const virtio_dev_t *)0) {
+        return "unknown";
+    }
+    if (dev->is_legacy != 0) {
+        return "virtio-pci-legacy";
+    }
+    if (dev->is_modern_pci != 0) {
+        return "virtio-pci-modern";
+    }
+    return "virtio-mmio";
+}
 
 void virtio_blk_dump_inventory(void)
 {
+    uint32_t i;
+
     serial_write("Block inventory  : ");
-    if (g_block_vda.present == 0) {
+    if (g_block_device_count == 0u) {
         serial_write("no disks\n");
         return;
     }
 
-    serial_write(g_block_vda.name);
-    serial_write(" sectors=");
-    serial_write_dec(g_block_vda.sector_count);
-    serial_write(" sector_size=");
-    serial_write_dec((uint64_t)g_block_vda.sector_size);
-    serial_write(" transport=");
-    if (g_virtio_blk_dev.is_legacy != 0) {
-        serial_write("virtio-pci-legacy");
-    } else if (g_virtio_blk_dev.is_modern_pci != 0) {
-        serial_write("virtio-pci-modern");
-    } else {
-        serial_write("virtio-mmio");
+    for (i = 0u; i < g_block_device_count; i++) {
+        if (i != 0u) {
+            serial_write("                   ");
+        }
+        serial_write(g_block_devices[i].name);
+        serial_write(" sectors=");
+        serial_write_dec(g_block_devices[i].sector_count);
+        serial_write(" sector_size=");
+        serial_write_dec((uint64_t)g_block_devices[i].sector_size);
+        serial_write(" transport=");
+        serial_write(virtio_blk_transport_name(&g_virtio_blk_devs[i]));
+        serial_write("\n");
     }
-    serial_write("\n");
 }
 
 /* --------------------------------------------------------------------------
@@ -94,69 +124,48 @@ void virtio_blk_dump_inventory(void)
 int virtio_blk_probe_and_init(void)
 {
 #ifdef ARCH_X86_64
-    uint32_t bar0;
-    uint32_t cap_lo;
-    uint32_t cap_hi;
-    uint64_t common_cfg;
-    uint64_t notify_cfg;
-    uint64_t device_cfg;
-    uint32_t notify_mult;
-    int ret;
+    uint32_t found;
 
-    common_cfg = 0u;
-    notify_cfg = 0u;
-    device_cfg = 0u;
-    notify_mult = 0u;
+    found = 0u;
+    while (found < BLOCK_DEV_MAX) {
+        uint32_t bar0;
+        uint32_t cap_lo;
+        uint32_t cap_hi;
+        uint16_t io_base;
 
-    if (pci_virtio_blk_probe_modern(&common_cfg, &notify_cfg, &device_cfg,
-                                    &notify_mult) == 0) {
-        if (virtio_blk_init_pci_modern(common_cfg, notify_cfg, device_cfg,
-                                       notify_mult, &g_virtio_blk_dev) != 0) {
-            serial_write("VirtIO block     : modern PCI init failed\n");
-            return -1;
+        if (pci_virtio_blk_probe_nth(found, &bar0) != 0) {
+            break;
         }
 
-        serial_write("VirtIO block     : modern PCI initialized\n");
-        cap_lo = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_dev.device_cfg_base + 0u);
-        cap_hi = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_dev.device_cfg_base + 4u);
-        g_block_vda.sector_count = ((uint64_t)cap_hi << 32) | (uint64_t)cap_lo;
-    } else {
+        serial_write("VirtIO block     : legacy probe matched\n");
+        if ((bar0 & 1u) != 1u) {
+            serial_write("VirtIO block     : unsupported non-legacy BAR\n");
+            break;
+        }
 
-    /*
-     * Scan PCI bus 0 for a VirtIO block device (legacy 0x1001 or modern 0x1042).
-     * bar0 is the raw BAR0 config-space value.
-     */
-    ret = pci_virtio_blk_probe(&bar0);
-    if (ret != 0) {
-        serial_write("VirtIO block     : PCI device not found\n");
-        return -1;   /* no VirtIO block device on bus 0 */
+        io_base = (uint16_t)(bar0 & 0xFFFCu);
+        if (virtio_blk_init_legacy(io_base, &g_virtio_blk_devs[found]) != 0) {
+            serial_write("VirtIO block     : legacy init failed\n");
+            break;
+        }
+
+        serial_write("VirtIO block     : legacy initialized\n");
+        cap_lo = inl((uint16_t)(io_base + LVIO_CAPACITY_LO));
+        cap_hi = inl((uint16_t)(io_base + LVIO_CAPACITY_HI));
+
+        virtio_blk_set_name(&g_block_devices[found], found);
+        g_block_devices[found].sector_size = 512u;
+        g_block_devices[found].sector_count = ((uint64_t)cap_hi << 32) | (uint64_t)cap_lo;
+        g_block_devices[found].present = 1;
+        found++;
     }
 
-    serial_write("VirtIO block     : legacy probe matched\n");
-    if ((bar0 & 1u) == 1u) {
-        /* I/O space BAR — legacy VirtIO PCI */
-        uint16_t io_base = (uint16_t)(bar0 & 0xFFFCu);
-
-        if (virtio_blk_init_legacy(io_base, &g_virtio_blk_dev) != 0) {
-                serial_write("VirtIO block     : legacy init failed\n");
-                return -1;
-            }
-    
-            serial_write("VirtIO block     : legacy initialized\n");
-            /*
-             * Read device capacity from VirtIO block device config space.
-             * In legacy VirtIO PCI, the device-specific config starts at I/O port
-             * base + LVIO_DEV_CFG_BASE (0x14).  First 8 bytes = 64-bit sector count.
-             */
-            cap_lo = inl((uint16_t)(io_base + LVIO_CAPACITY_LO));
-            cap_hi = inl((uint16_t)(io_base + LVIO_CAPACITY_HI));
-            g_block_vda.sector_count = ((uint64_t)cap_hi << 32) | (uint64_t)cap_lo;
-    } else {
-        /* MMIO BAR — modern VirtIO PCI (non-transitional) */
-        /* Not supported in Phase 3A; return error */
+    if (found == 0u) {
+        serial_write("VirtIO block     : PCI device not found\n");
         return -1;
     }
-    }
+
+    g_block_device_count = found;
 #endif
 
 #ifdef ARCH_AARCH64
@@ -182,7 +191,7 @@ int virtio_blk_probe_and_init(void)
                                          &common_cfg, &notify_cfg,
                                          &device_cfg, &notify_mult) == 0) {
         if (virtio_blk_init_pci_modern(common_cfg, notify_cfg, device_cfg,
-                                       notify_mult, &g_virtio_blk_dev) != 0) {
+                                       notify_mult, &g_virtio_blk_devs[0]) != 0) {
             return -1;
         }
     } else {
@@ -191,24 +200,22 @@ int virtio_blk_probe_and_init(void)
             return -1;
         }
 
-        if (virtio_blk_init_mmio(mmio_base, &g_virtio_blk_dev) != 0) {
+        if (virtio_blk_init_mmio(mmio_base, &g_virtio_blk_devs[0]) != 0) {
             return -1;
         }
     }
 
-    cap_lo = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_dev.device_cfg_base + 0u);
-    cap_hi = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_dev.device_cfg_base + 4u);
-    g_block_vda.sector_count = ((uint64_t)cap_hi << 32) | (uint64_t)cap_lo;
+    cap_lo = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_devs[0].device_cfg_base + 0u);
+    cap_hi = *(volatile uint32_t *)(uintptr_t)(g_virtio_blk_devs[0].device_cfg_base + 4u);
+    virtio_blk_set_name(&g_block_devices[0], 0u);
+    g_block_devices[0].sector_size = 512u;
+    g_block_devices[0].sector_count = ((uint64_t)cap_hi << 32) | (uint64_t)cap_lo;
+    g_block_devices[0].present = 1;
+    g_block_device_count = 1u;
 #endif
 
-    /* Populate the block device descriptor */
-    g_block_vda.name[0] = 'v';
-    g_block_vda.name[1] = 'd';
-    g_block_vda.name[2] = 'a';
-    g_block_vda.name[3] = '\0';
-    g_block_vda.sector_size = 512u;
-    g_block_vda.present     = 1;
-    g_virtio_blk_dev.initialized = 1;
+    g_block_vda = g_block_devices[0];
+    g_virtio_blk_dev = g_virtio_blk_devs[0];
 
     virtio_blk_dump_inventory();
 
@@ -225,14 +232,22 @@ int virtio_blk_probe_and_init(void)
 
 int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj)
 {
+    return native_read_sector_device(0, lba, count, arr_obj);
+}
+
+int32_t native_read_sector_device(int32_t device_index, int64_t lba, int32_t count, void *arr_obj)
+{
     uint8_t *data_ptr;
     int      rc;
+    virtio_dev_t *dev;
 
-    if (arr_obj == (void *)0 || count <= 0) {
+    if (arr_obj == (void *)0 || count <= 0 || device_index < 0 ||
+        (uint32_t)device_index >= g_block_device_count) {
         serial_write("VirtIO block     : read invalid args\n");
         return -1;
     }
-    if (g_virtio_blk_dev.initialized == 0) {
+    dev = &g_virtio_blk_devs[device_index];
+    if (dev->initialized == 0) {
         serial_write("VirtIO block     : read before init\n");
         return -1;
     }
@@ -240,7 +255,7 @@ int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj)
     /* Data starts immediately after the 16-byte managed array header */
     data_ptr = (uint8_t *)arr_obj + CLR_ARR_HDR_SIZE;
 
-    rc = virtio_blk_read(&g_virtio_blk_dev, (uint64_t)lba,
+    rc = virtio_blk_read(dev, (uint64_t)lba,
                          (uint32_t)count, data_ptr);
     if (rc != 0) {
         serial_write("VirtIO block     : read failed\n");
@@ -250,19 +265,27 @@ int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj)
 
 int32_t native_write_sector(int64_t lba, int32_t count, void *arr_obj)
 {
+    return native_write_sector_device(0, lba, count, arr_obj);
+}
+
+int32_t native_write_sector_device(int32_t device_index, int64_t lba, int32_t count, void *arr_obj)
+{
     const uint8_t *data_ptr;
     int            rc;
+    virtio_dev_t  *dev;
 
-    if (arr_obj == (void *)0 || count <= 0) {
+    if (arr_obj == (void *)0 || count <= 0 || device_index < 0 ||
+        (uint32_t)device_index >= g_block_device_count) {
         return -1;
     }
-    if (g_virtio_blk_dev.initialized == 0) {
+    dev = &g_virtio_blk_devs[device_index];
+    if (dev->initialized == 0) {
         return -1;
     }
 
     data_ptr = (const uint8_t *)arr_obj + CLR_ARR_HDR_SIZE;
 
-    rc = virtio_blk_write(&g_virtio_blk_dev, (uint64_t)lba,
+    rc = virtio_blk_write(dev, (uint64_t)lba,
                           (uint32_t)count, data_ptr);
     return (int32_t)rc;
 }

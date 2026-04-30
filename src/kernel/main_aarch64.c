@@ -48,6 +48,7 @@
 
 #if defined(ZACLR_ENABLED)
 #include <kernel/zaclr/boot/zaclr_boot_path.h>
+#include <kernel/zaclr/runtime/zaclr_boot_shared.h>
 #else
 #include <kernel/clr/api/runtime_api.h>
 #include <kernel/clr/runtime/runtime_boot.h>
@@ -125,6 +126,26 @@ static void probe_aarch64_display(uint64_t fdt_base)
     console_write("Display path       : serial/UART remains primary on this architecture\n");
 }
 
+static void capture_aarch64_command_line(uint64_t fdt_base)
+{
+    const char *bootargs = fdt_get_bootargs(fdt_base);
+    if (bootargs == NULL) {
+        bootargs = "";
+    }
+
+    console_write("Command line       : ");
+    if (bootargs[0] == '\0') {
+        console_write("<empty>");
+    } else {
+        console_write(bootargs);
+    }
+    console_write("\n");
+
+#if defined(ZACLR_ENABLED)
+    zaclr_boot_shared_set_command_line(bootargs);
+#endif
+}
+
 /* ------------------------------------------------------------------ */
 /* kernel_main_aarch64                                                  */
 /* ------------------------------------------------------------------ */
@@ -162,6 +183,7 @@ void kernel_main_aarch64(uint64_t fdt_base)
     /* Probe the FDT for available RAM. Populates mem_base and mem_size. */
     probe_fdt(fdt_base, &mem_base, &mem_size);
     probe_aarch64_display(fdt_base);
+    capture_aarch64_command_line(fdt_base);
 
     if (fdt_get_initrd(fdt_base, &initrd_start, &initrd_end)) {
         console_write("Initramfs module   : discovered\n");

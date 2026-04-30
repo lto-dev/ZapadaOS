@@ -321,3 +321,84 @@ int fdt_get_initrd(uint64_t fdt_base, uint64_t *out_start, uint64_t *out_end)
         }
     }
 }
+
+const char *fdt_get_bootargs(uint64_t fdt_base)
+{
+    const struct fdt_header *hdr;
+    uint32_t struct_off;
+    uint32_t strings_off;
+    const char *strings_blk;
+    const uint32_t *p;
+    int in_chosen_node = 0;
+    int depth = 0;
+    int chosen_depth = 0;
+
+    if (!fdt_is_valid(fdt_base)) {
+        return 0;
+    }
+
+    hdr = (const struct fdt_header *)(uintptr_t)fdt_base;
+    struct_off = fdt_be32(hdr->off_dt_struct);
+    strings_off = fdt_be32(hdr->off_dt_strings);
+    strings_blk = (const char *)(uintptr_t)(fdt_base + strings_off);
+    p = (const uint32_t *)(uintptr_t)(fdt_base + struct_off);
+
+    for (;;) {
+        uint32_t token = fdt_be32(*p);
+        ++p;
+
+        switch (token) {
+        case FDT_BEGIN_NODE: {
+            const char *name = (const char *)p;
+            size_t len = 0;
+            while (name[len]) { ++len; }
+            ++depth;
+            p = (const uint32_t *)(uintptr_t)(((uintptr_t)name + len + 1u + 3u) & ~3u);
+
+            if (depth == 2 && fdt_strcmp(name, "chosen") == 0) {
+                in_chosen_node = 1;
+                chosen_depth = depth;
+            }
+            break;
+        }
+
+        case FDT_END_NODE:
+            if (in_chosen_node && depth == chosen_depth) {
+                in_chosen_node = 0;
+            }
+            --depth;
+            if (depth < 0) {
+                return 0;
+            }
+            break;
+
+        case FDT_PROP: {
+            const struct fdt_prop_header *phdr = (const struct fdt_prop_header *)p;
+            uint32_t prop_len = fdt_be32(phdr->len);
+            uint32_t nameoff = fdt_be32(phdr->nameoff);
+            const char *prop_name;
+            const uint8_t *data;
+
+            p += 2;
+            prop_name = strings_blk + nameoff;
+            data = (const uint8_t *)p;
+
+            if (in_chosen_node && prop_len > 0u && fdt_strcmp(prop_name, "bootargs") == 0) {
+                return (const char *)data;
+            }
+
+            p = (const uint32_t *)(uintptr_t)(((uintptr_t)data + prop_len + 3u) & ~3u);
+            break;
+        }
+
+        case FDT_NOP:
+            break;
+
+        case FDT_END:
+            return 0;
+
+        default:
+            return 0;
+        }
+    }
+}

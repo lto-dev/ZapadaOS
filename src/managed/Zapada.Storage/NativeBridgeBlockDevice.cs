@@ -3,9 +3,16 @@ namespace Zapada.Storage;
 public sealed class NativeBridgeBlockDevice : BlockDevice
 {
     private readonly BlockDeviceInfo _info;
+    private readonly int _deviceIndex;
 
     public NativeBridgeBlockDevice(string name, string driverKey, int sectorSize, long sectorCount)
+        : this(name, driverKey, sectorSize, sectorCount, 0)
     {
+    }
+
+    public NativeBridgeBlockDevice(string name, string driverKey, int sectorSize, long sectorCount, int deviceIndex)
+    {
+        _deviceIndex = deviceIndex;
         _info = new BlockDeviceInfo();
         _info.Initialize(name, driverKey, sectorSize, sectorCount, false, false);
     }
@@ -28,7 +35,7 @@ public sealed class NativeBridgeBlockDevice : BlockDevice
             return StorageStatus.InvalidArgument;
 
         int[] intBuffer = new int[sectorCount * 128];
-        int rc = Zapada.BlockDev.ReadSector(lba, sectorCount, intBuffer);
+        int rc = Zapada.BlockDev.ReadSectorForDevice(_deviceIndex, lba, sectorCount, intBuffer);
         if (rc != 0)
             return StorageStatus.IoError;
 
@@ -54,7 +61,7 @@ public sealed class NativeBridgeBlockDevice : BlockDevice
         for (int i = 0; i < byteCount; i++)
             intBuffer[i / 4] = intBuffer[i / 4] | ((buffer[bufferOffset + i] & 0xFF) << ((i % 4) * 8));
 
-        int rc = Zapada.BlockDev.WriteSector(lba, sectorCount, intBuffer);
+        int rc = Zapada.BlockDev.WriteSectorForDevice(_deviceIndex, lba, sectorCount, intBuffer);
         if (rc != 0)
             return StorageStatus.IoError;
 

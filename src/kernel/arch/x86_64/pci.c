@@ -227,9 +227,12 @@ void pci_dump_inventory(void)
  * Accepts both legacy (0x1001) and modern (0x1042) device IDs.
  * Sets *bar0_out to the raw BAR0 config-space value (caller decodes type bits).
  */
-int pci_virtio_blk_probe(uint32_t *bar0_out)
+int pci_virtio_blk_probe_nth(uint32_t target_index, uint32_t *bar0_out)
 {
     uint16_t bus;
+    uint32_t matched;
+
+    matched = 0u;
 
     for (bus = 0u; bus < 256u; bus++) {
         uint8_t dev;
@@ -259,14 +262,23 @@ int pci_virtio_blk_probe(uint32_t *bar0_out)
                     continue;
                 }
 
-                pci_enable_device_io_memory_busmaster((uint8_t)bus, dev, fn);
-                *bar0_out = pci_cfg_read32((uint8_t)bus, dev, fn, 0x10u);
-                return 0;
+                if (matched == target_index) {
+                    pci_enable_device_io_memory_busmaster((uint8_t)bus, dev, fn);
+                    *bar0_out = pci_cfg_read32((uint8_t)bus, dev, fn, 0x10u);
+                    return 0;
+                }
+
+                matched++;
             }
         }
     }
 
     return -1;
+}
+
+int pci_virtio_blk_probe(uint32_t *bar0_out)
+{
+    return pci_virtio_blk_probe_nth(0u, bar0_out);
 }
 
 int pci_virtio_blk_probe_modern(uint64_t *common_cfg_out,

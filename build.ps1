@@ -32,7 +32,9 @@ param(
 
     [switch]$SkipDotnet, # skip managed `dotnet publish` steps and reuse existing staged DLLs
 
-    [switch]$NativeClean # run `make clean` before the native make step
+    [switch]$NativeClean, # run `make clean` before the native make step
+
+    [switch]$Smoke # build an x86_64 ISO whose GRUB command line contains --smoke
 )
 
 $dotnetBuildEnabled = -not $SkipDotnet
@@ -501,7 +503,8 @@ if ($Arch -eq "aarch64") {
     Write-Host "  Project : $wslProject" -ForegroundColor Gray
     Write-Host ""
 
-    wsl bash -c "cd '$wslProject' && make ENABLE_ZACLR=1 zaclr-generated 2>&1 && make ENABLE_ZACLR=1 all 2>&1"
+    $smokeMakeArg = if ($Smoke) { " KERNEL_CMDLINE=--smoke" } else { "" }
+    wsl bash -c "cd '$wslProject' && make ENABLE_ZACLR=1 zaclr-generated 2>&1 && make ENABLE_ZACLR=1$smokeMakeArg all 2>&1"
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""

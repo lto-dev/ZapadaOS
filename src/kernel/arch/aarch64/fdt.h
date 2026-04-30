@@ -31,6 +31,7 @@
 int      fdt_is_valid(uint64_t fdt_base);
 int      fdt_get_memory(uint64_t fdt_base, uint64_t *out_base, uint64_t *out_size);
 int      fdt_get_initrd(uint64_t fdt_base, uint64_t *out_start, uint64_t *out_end);
+const char *fdt_get_bootargs(uint64_t fdt_base);
 
 /* Known-good fallback for BCM2837 family (RPi 3, 3+, 3A+) - 1 GiB SDRAM. */
 #define RPI3_RAM_BASE  0x00000000UL

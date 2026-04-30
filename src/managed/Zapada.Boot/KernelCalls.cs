@@ -36,6 +36,9 @@ namespace Zapada
          */
         [MethodImpl(MethodImplOptions.InternalCall)]
         internal static extern void SetBootPartLba(int lba);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern string GetBootCommandLine();
     }
 }
 

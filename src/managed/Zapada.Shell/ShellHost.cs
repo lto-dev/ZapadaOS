@@ -9,7 +9,7 @@ public static class ShellHost
     private const int ShellExit = 1;
     private const string Prompt = "zapada:/# ";
 
-    public static int RunBootShell()
+    public static int RunBootSmoke()
     {
         Console.Write("\n");
         Console.Write("Zapada Shell\n");
@@ -22,6 +22,12 @@ public static class ShellHost
         RunBootSmokeCommand("partitions");
         RunBootSmokeCommand("ls /");
         RunBootSmokeCommand("ls /mnt/c");
+        RunBootSmokeCommand("ls /mnt/d");
+        RunBootSmokeCommand("ls /dev");
+        RunBootSmokeCommand("ls /proc");
+        RunBootSmokeCommand("cat /proc/mounts");
+        RunBootSmokeCommand("cat /proc/drivers");
+        RunBootSmokeCommand("entropy");
         RunBootSmokeCommand("cat /etc/fstab");
         Console.Write("[Gate] Phase-Shell\n");
         PrintPrompt();
@@ -97,6 +103,8 @@ public static class ShellHost
             return ListPath(ReadArgumentOrDefault(line, argStart, argEnd, "/"));
         if (TextEquals(line, commandStart, commandLength, "cat") || TextEquals(line, commandStart, commandLength, "type"))
             return CatPath(ReadArgumentOrDefault(line, argStart, argEnd, ""));
+        if (TextEquals(line, commandStart, commandLength, "entropy") || TextEquals(line, commandStart, commandLength, "random"))
+            return PrintEntropy(ReadArgumentOrDefault(line, argStart, argEnd, "/dev/urandom"));
         if (TextEquals(line, commandStart, commandLength, "clear") || TextEquals(line, commandStart, commandLength, "cls"))
             return ClearScreen();
         if (TextEquals(line, commandStart, commandLength, "exit") || TextEquals(line, commandStart, commandLength, "halt"))
@@ -167,6 +175,7 @@ public static class ShellHost
         Console.Write("  pwd               print the current directory\n");
         Console.Write("  ls [path]         list a directory\n");
         Console.Write("  cat <path>        print a text file\n");
+        Console.Write("  entropy [device]  read 16 random bytes as hex\n");
         Console.Write("  clear             add terminal spacing\n");
         Console.Write("  exit, halt        leave the shell loop\n");
         return StorageStatus.Ok;
@@ -279,6 +288,50 @@ public static class ShellHost
         return rc;
     }
 
+    private static int PrintEntropy(string path)
+    {
+        if (path == null || path.Length == 0)
+            path = "/dev/urandom";
+
+        int fd = Vfs.Open(path);
+        if (fd < 0)
+        {
+            Console.Write("[Shell] entropy open failed rc=");
+            Console.Write(fd);
+            Console.Write(" path=");
+            Console.Write(path);
+            Console.Write("\n");
+            return fd;
+        }
+
+        byte[] buffer = new byte[16];
+        int bytesRead = Vfs.Read(fd, buffer, 0, buffer.Length);
+        Vfs.Close(fd);
+
+        if (bytesRead < 0)
+        {
+            Console.Write("[Shell] entropy read failed rc=");
+            Console.Write(bytesRead);
+            Console.Write(" path=");
+            Console.Write(path);
+            Console.Write("\n");
+            return bytesRead;
+        }
+
+        Console.Write("[Shell] entropy source: ");
+        Console.Write(path);
+        Console.Write(" (provisional non-cryptographic)\n");
+        Console.Write("[Shell] entropy bytes:");
+        for (int i = 0; i < bytesRead; i++)
+        {
+            Console.Write(" ");
+            WriteHexByte(buffer[i] & 0xFF);
+        }
+        Console.Write("\n");
+        Console.Write("[Gate] Phase-Entropy\n");
+        return StorageStatus.Ok;
+    }
+
     private static int PrintFile(string path, bool quietMissing)
     {
         int fd = Vfs.Open(path);
@@ -363,6 +416,23 @@ public static class ShellHost
         }
 
         Console.Write(".");
+    }
+
+    private static void WriteHexByte(int value)
+    {
+        WriteHexNibble((value >> 4) & 0xF);
+        WriteHexNibble(value & 0xF);
+    }
+
+    private static void WriteHexNibble(int value)
+    {
+        if (value < 10)
+        {
+            Console.Write((char)('0' + value));
+            return;
+        }
+
+        Console.Write((char)('a' + (value - 10)));
     }
 
     private static string ReadArgumentOrDefault(string line, int argStart, int argEnd, string defaultValue)

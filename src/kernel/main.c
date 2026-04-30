@@ -54,6 +54,7 @@
 
 #if defined(ZACLR_ENABLED)
 #include <kernel/zaclr/boot/zaclr_boot_path.h>
+#include <kernel/zaclr/runtime/zaclr_boot_shared.h>
 #else
 #include <kernel/clr/api/runtime_api.h>
 #include <kernel/clr/runtime/runtime_boot.h>
@@ -130,6 +131,27 @@ static void boot_print_bootloader_name(mb2_info_t *mb_info)
         serial_write(loader_tag->string);
         serial_write("\n");
     }
+}
+
+static void boot_capture_command_line(mb2_info_t *mb_info)
+{
+    mb2_tag_cmdline_t *cmdline_tag;
+
+    cmdline_tag = (mb2_tag_cmdline_t *)mb2_find_tag(mb_info, MB2_TAG_CMDLINE);
+    if (cmdline_tag == NULL) {
+        serial_write("Command line       : <empty>\n");
+#if defined(ZACLR_ENABLED)
+        zaclr_boot_shared_set_command_line("");
+#endif
+        return;
+    }
+
+    serial_write("Command line       : ");
+    serial_write(cmdline_tag->string);
+    serial_write("\n");
+#if defined(ZACLR_ENABLED)
+    zaclr_boot_shared_set_command_line(cmdline_tag->string);
+#endif
 }
 
 static void boot_try_init_framebuffer(mb2_info_t *mb_info)
@@ -284,6 +306,7 @@ void kernel_main(uint32_t mb_magic, mb2_info_t *mb_info)
     boot_print_mb2_info(mb_info);
     boot_print_memory_map(mb_info);
     boot_print_bootloader_name(mb_info);
+    boot_capture_command_line(mb_info);
     boot_discover_initramfs(mb_info);
     boot_try_init_framebuffer(mb_info);
 

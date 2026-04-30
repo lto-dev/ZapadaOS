@@ -3,22 +3,30 @@ using Zapada.Storage;
 namespace Zapada.Fs.Vfs;
 
 /// <summary>
-/// Static mount table for the VFS layer. Supports up to 4 mount points.
+/// Static mount table for the VFS layer. Supports up to 8 mount points.
 /// Each slot holds a path prefix and a mounted volume reference.
 /// </summary>
 internal static class MountTable
 {
-    private const int MaxMounts = 4;
+    private const int MaxMounts = 8;
 
     private static string? s_path0;
     private static string? s_path1;
     private static string? s_path2;
     private static string? s_path3;
+    private static string? s_path4;
+    private static string? s_path5;
+    private static string? s_path6;
+    private static string? s_path7;
 
     private static MountedVolume? s_volume0;
     private static MountedVolume? s_volume1;
     private static MountedVolume? s_volume2;
     private static MountedVolume? s_volume3;
+    private static MountedVolume? s_volume4;
+    private static MountedVolume? s_volume5;
+    private static MountedVolume? s_volume6;
+    private static MountedVolume? s_volume7;
 
     private static int s_count;
 
@@ -31,10 +39,18 @@ internal static class MountTable
         s_path1 = null;
         s_path2 = null;
         s_path3 = null;
+        s_path4 = null;
+        s_path5 = null;
+        s_path6 = null;
+        s_path7 = null;
         s_volume0 = null;
         s_volume1 = null;
         s_volume2 = null;
         s_volume3 = null;
+        s_volume4 = null;
+        s_volume5 = null;
+        s_volume6 = null;
+        s_volume7 = null;
         s_count = 0;
     }
 
@@ -142,6 +158,14 @@ internal static class MountTable
             return s_path2;
         if (slot == 3)
             return s_path3;
+        if (slot == 4)
+            return s_path4;
+        if (slot == 5)
+            return s_path5;
+        if (slot == 6)
+            return s_path6;
+        if (slot == 7)
+            return s_path7;
 
         return null;
     }
@@ -159,6 +183,14 @@ internal static class MountTable
             return s_volume2;
         if (slot == 3)
             return s_volume3;
+        if (slot == 4)
+            return s_volume4;
+        if (slot == 5)
+            return s_volume5;
+        if (slot == 6)
+            return s_volume6;
+        if (slot == 7)
+            return s_volume7;
 
         return null;
     }
@@ -182,6 +214,22 @@ internal static class MountTable
             case 3:
                 s_path3 = path;
                 s_volume3 = volume;
+                return;
+            case 4:
+                s_path4 = path;
+                s_volume4 = volume;
+                return;
+            case 5:
+                s_path5 = path;
+                s_volume5 = volume;
+                return;
+            case 6:
+                s_path6 = path;
+                s_volume6 = volume;
+                return;
+            case 7:
+                s_path7 = path;
+                s_volume7 = volume;
                 return;
         }
     }

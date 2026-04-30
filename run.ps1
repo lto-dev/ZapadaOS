@@ -80,6 +80,7 @@ if ($Arch -eq "x86_64") {
     New-Item -ItemType Directory -Force -Path ".\build" | Out-Null
 
     $DISK = ".\build\disk.img"
+    $DISK2 = ".\build\disk2.img"
 
     $qemuArgs = @(
         "-machine", "pc",
@@ -104,6 +105,14 @@ if ($Arch -eq "x86_64") {
         $qemuArgs += "-device"
         $qemuArgs += "virtio-blk-pci,drive=d0,disable-modern=on,disable-legacy=off,addr=0x4"
         Write-Host "  Disk image  : $DISK (VirtIO PCI legacy/transitional)" -ForegroundColor Gray
+    }
+
+    if (Test-Path $DISK2) {
+        $qemuArgs += "-drive"
+        $qemuArgs += "file=$DISK2,format=raw,if=none,id=d1"
+        $qemuArgs += "-device"
+        $qemuArgs += "virtio-blk-pci,drive=d1,disable-modern=on,disable-legacy=off,addr=0x5"
+        Write-Host "  Disk image  : $DISK2 (VirtIO PCI legacy/transitional)" -ForegroundColor Gray
     }
 
     if ($WaitForGdb) {

@@ -767,7 +767,7 @@ function Invoke-Build {
 
     $debugMakeFlag = if ($DebugBuild) { " DEBUG=1" } else { "" }
     if ($ArchName -eq "x86_64") {
-        $makeCmd = "make clean >/dev/null 2>&1 ; make all$debugMakeFlag"
+        $makeCmd = "make clean >/dev/null 2>&1 ; make KERNEL_CMDLINE=--smoke all$debugMakeFlag"
     } else {
         $makeCmd = "make clean >/dev/null 2>&1 ; make ARCH=aarch64 BOARD=$Board all$debugMakeFlag"
     }
@@ -868,8 +868,10 @@ function Test-X86_64 {
     # Recreate the disk image every run so Phase 3A Part 2/3 always test against
     # a known-good GPT/FAT32 image with the expected ZAPADASK signature and TEST.DLL.
     $DISK = ".\build\disk.img"
-    Write-Host "  Creating VirtIO disk image for gate check..." -ForegroundColor Cyan
+    $DISK2 = ".\build\disk2.img"
+    Write-Host "  Creating VirtIO disk images for gate check..." -ForegroundColor Cyan
     & .\scripts\make-disk.ps1 -Force | Out-Null
+    & .\scripts\make-disk2.ps1 -Force | Out-Null
 
     $ISO = ".\build\Zapada.iso"
     $LOG = ".\build\serial.log"
@@ -887,6 +889,7 @@ function Test-X86_64 {
     $isoAbs  = (Resolve-Path $ISO).Path
     $logAbs  = (Resolve-Path ".\build").Path + "\serial.log"
     $diskAbs = (Resolve-Path ".\build").Path + "\disk.img"
+    $disk2Abs = (Resolve-Path ".\build").Path + "\disk2.img"
     $args = @(
         "-machine", "pc",
         "-cpu",     "qemu64",
@@ -906,13 +909,21 @@ function Test-X86_64 {
         $args += "virtio-blk-pci,drive=d0,disable-modern=on,disable-legacy=off,addr=0x4"
     }
 
+    if (Test-Path $DISK2) {
+        $args += "-drive"
+        $args += "file=$disk2Abs,format=raw,if=none,id=d1"
+        $args += "-device"
+        $args += "virtio-blk-pci,drive=d1,disable-modern=on,disable-legacy=off,addr=0x5"
+    }
+
     Write-Host "  Running QEMU (timeout: ${TimeoutSec}s)..." -ForegroundColor Gray
     $null = Invoke-QemuWithTimeout -QemuExe $qemu -QemuArgs $args `
                                    -LogPath $LOG -TimeoutMs ($TimeoutSec * 1000)
 
-    # 53 array checks + 8 standalone checks = 61 content checks: Phase 2A/2B/2C + Phase 3.2 S1 + managed boot gates (x86_64)
+    # Array checks + standalone checks cover Phase 2A/2B/2C, managed boot gates, and storage shell smoke (x86_64).
     $checks  = @(
         "Phase 3A banner",
+        "Native command line smoke mode",
         "GDT loaded",
         "IDT loaded",
         "PMM initialized",
@@ -954,6 +965,12 @@ function Test-X86_64 {
         "Phase Ext4 read gate",
         "Phase Ext4 fstab gate",
         "Phase FAT32 mounted at /mnt/c gate",
+        "Phase FAT32 mounted at /mnt/d gate",
+        "Phase multi-disk storage gate",
+        "Phase DevFs gate",
+        "Phase ProcFs gate",
+        "Boot command line smoke mode",
+        "Shell smoke mode selected",
         "Shell banner",
         "Shell mount command",
         "Shell drivers command",
@@ -961,6 +978,13 @@ function Test-X86_64 {
         "Shell partitions command",
         "Shell root listing command",
         "Shell /mnt/c listing command",
+        "Shell /mnt/d listing command",
+        "Shell /dev listing command",
+        "Shell /proc listing command",
+        "Shell /proc mounts command",
+        "Shell /proc drivers command",
+        "Shell entropy command",
+        "Shell entropy gate",
         "Shell fstab cat command",
         "Shell gate",
         "Phase 3.1 D.4 VFS initialized",
@@ -970,6 +994,7 @@ function Test-X86_64 {
     )
     $patterns = @(
         "Zapada - Phase 3A bring-up",
+        "Command line       : --smoke",
         "GDT                : loaded",
         "IDT                : loaded",
         "PMM free frames    : ",
@@ -1011,20 +1036,54 @@ function Test-X86_64 {
         "[Gate] Phase-Ext4Read",
         "[Gate] Phase-Ext4Fstab",
         "[Gate] Phase-Fat32MntC",
+        "[Gate] Phase-Fat32MntD",
+        "[Gate] Phase-MultiDiskStorage",
+        "[Gate] Phase-DevFs",
+        "[Gate] Phase-ProcFs",
+        "[Boot] command line: --smoke",
+        "[Boot] shell mode: smoke",
         "Zapada Shell",
         "[Shell] $ mount",
         "[Shell] $ drivers",
         "driver                 state       uses provides",
-        "virtio-blk started 1 block.device:vda,hal.smoke",
+        "virtio-blk started 2 block.device:vda,hal.smoke",
         "[Shell] $ block",
         "block                  driver sector-size sectors flags",
         "vda virtio-blk 512",
+        "vdb virtio-blk 512",
         "[Shell] $ partitions",
         "partition              device label start sectors scheme",
         "vda1 vda ZAPADA_BOOT",
         "vda2 vda ZAPADA_DATA",
+        "vdb1 vdb ZAPADA_SMOKE",
         "[Shell] $ ls /",
         "[Shell] $ ls /mnt/c",
+        "[Shell] $ ls /mnt/d",
+        "[Shell] $ ls /dev",
+        "<node> vda",
+        "<node> vdb",
+        "<node> vda1",
+        "<node> vda2",
+        "<node> vdb1",
+        "[Shell] $ ls /proc",
+        "<file> mounts",
+        "<file> drivers",
+        "<file> devices",
+        "<file> partitions",
+        "<file> interrupts",
+        "<file> meminfo",
+        "<file> uptime",
+        "[Shell] $ cat /proc/mounts",
+        "mount driver label name",
+        "/mnt/d fat32 fat32 FAT32 volume",
+        "/proc procfs procfs Zapada process namespace",
+        "[Shell] $ cat /proc/drivers",
+        "driver state uses provides requires binds",
+        "virtio-blk started 2 block.device:vda,hal.smoke",
+        "[Shell] $ entropy",
+        "[Shell] entropy source: /dev/urandom (provisional non-cryptographic)",
+        "[Shell] entropy bytes:",
+        "[Gate] Phase-Entropy",
         "[Shell] $ cat /etc/fstab",
         "[Gate] Phase-Shell",
         "[Boot] VFS initialized",
@@ -1133,6 +1192,7 @@ function Test-AArch64 {
         "-global",  "virtio-mmio.force-legacy=false",
         "-serial",  "file:$probeLogAbs",
         "-display", "none",
+        "-append",  "--smoke",
         "-no-reboot"
     )
     if ($null -ne $initrdAbs) {
@@ -1166,6 +1226,7 @@ function Test-AArch64 {
         "-global",  "virtio-mmio.force-legacy=false",
         "-serial",  "file:$logAbs",
         "-display", "none",
+        "-append",  "--smoke",
         "-no-reboot"
     )
     if ($null -ne $initrdAbs) {

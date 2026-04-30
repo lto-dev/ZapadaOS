@@ -22,6 +22,7 @@
  * Defined in virtio_blk.c; zeroed until virtio_blk_probe_and_init().
  */
 extern virtio_dev_t g_virtio_blk_dev;
+extern virtio_dev_t g_virtio_blk_devs[BLOCK_DEV_MAX];
 
 /*
  * virtio_blk_probe_and_init - Discover and initialise the VirtIO block device.
@@ -54,6 +55,7 @@ void virtio_blk_dump_inventory(void);
  * Returns 0 on success, non-zero on error.
  */
 int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj);
+int32_t native_read_sector_device(int32_t device_index, int64_t lba, int32_t count, void *arr_obj);
 
 /*
  * native_write_sector - C handler for the WriteSector InternalCall.
@@ -63,6 +65,7 @@ int32_t native_read_sector(int64_t lba, int32_t count, void *arr_obj);
  *   internal static extern int WriteSector(long lba, int count, int[] buf);
  */
 int32_t native_write_sector(int64_t lba, int32_t count, void *arr_obj);
+int32_t native_write_sector_device(int32_t device_index, int64_t lba, int32_t count, void *arr_obj);
 
 #endif /* ZAPADA_DRIVERS_VIRTIO_BLK_H */
 

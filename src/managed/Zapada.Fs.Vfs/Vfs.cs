@@ -277,6 +277,42 @@ public static class Vfs
         }
     }
 
+    public static string GetMountPath(int index)
+    {
+        string? path = MountTable.GetPath(index);
+        if (path == null)
+            return "";
+
+        return path;
+    }
+
+    public static string GetMountDriverKey(int index)
+    {
+        MountedVolume? volume = MountTable.GetVolume(index);
+        if (volume == null)
+            return "";
+
+        return volume.GetDriverKey();
+    }
+
+    public static string GetMountDisplayName(int index)
+    {
+        MountedVolume? volume = MountTable.GetVolume(index);
+        if (volume == null)
+            return "";
+
+        return volume.GetDisplayName();
+    }
+
+    public static string GetMountVolumeLabel(int index)
+    {
+        MountedVolume? volume = MountTable.GetVolume(index);
+        if (volume == null)
+            return "";
+
+        return volume.GetVolumeLabel();
+    }
+
     public static bool IsInitialized => s_initialized;
     public static int MountCount => MountTable.Count;
 }
