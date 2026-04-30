@@ -5,7 +5,7 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <Optimize>true</Optimize>
-    <AssemblyName>Zapada.Drivers.VirtioBlock</AssemblyName>
+    <AssemblyName>Zapada.Drivers.Usb</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Zapada.Drivers/Zapada.Drivers.csproj" />

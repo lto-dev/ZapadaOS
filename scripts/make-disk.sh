@@ -80,6 +80,12 @@ if [ ! -f "$VBLK_DLL" ] && [ -f "$VBLK_DLL_BIN" ]; then
     VBLK_DLL="$VBLK_DLL_BIN"
 fi
 
+USB_DLL="$WORKSPACE_DIR/build/usb.dll"
+USB_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Drivers.Usb/bin/Release/net10.0/Zapada.Drivers.Usb.dll"
+if [ ! -f "$USB_DLL" ] && [ -f "$USB_DLL_BIN" ]; then
+    USB_DLL="$USB_DLL_BIN"
+fi
+
 DRIVERS_DLL="$WORKSPACE_DIR/build/drivers.dll"
 DRIVERS_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Drivers/bin/Release/net10.0/Zapada.Drivers.dll"
 if [ ! -f "$DRIVERS_DLL" ] && [ -f "$DRIVERS_DLL_BIN" ]; then
@@ -170,6 +176,7 @@ cat > "$TMP_FSTAB_FILE" <<'FSTAB'
 LABEL=ZAPADA_BOOT /           ext4    ro
 LABEL=ZAPADA_DATA /mnt/c      vfat    ro
 LABEL=ZAPADA_SMOKE /mnt/d     vfat    ro
+LABEL=ZAPADA_USB /mnt/u       vfat    ro
 FSTAB
 cat > "$TMP_MOTD_FILE" <<'MOTD'
 Welcome to Zapada.
@@ -179,6 +186,8 @@ MOTD
 debugfs -w -R "mkdir /etc" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt/c" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /mnt/d" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /mnt/u" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "write $TMP_DUMMY_FILE /dummy.txt" "$TMP_EXT4_IMG" > /dev/null 2>&1
 debugfs -w -R "write $TMP_FSTAB_FILE /etc/fstab" "$TMP_EXT4_IMG" > /dev/null 2>&1
 debugfs -w -R "write $TMP_MOTD_FILE /etc/motd" "$TMP_EXT4_IMG" > /dev/null 2>&1
@@ -200,6 +209,7 @@ write_ext4_payload "$BOOT_DLL" "/Zapada.Boot.dll" "Zapada.Boot.dll"
 write_ext4_payload "$HELLO_DLL" "/Zapada.Test.Hello.dll" "Zapada.Test.Hello.dll"
 write_ext4_payload "$DRIVERS_DLL" "/Zapada.Drivers.dll" "Zapada.Drivers.dll"
 write_ext4_payload "$VBLK_DLL" "/Zapada.Drivers.VirtioBlock.dll" "Zapada.Drivers.VirtioBlock.dll"
+write_ext4_payload "$USB_DLL" "/Zapada.Drivers.Usb.dll" "Zapada.Drivers.Usb.dll"
 write_ext4_payload "$GPT_DLL" "/Zapada.Fs.Gpt.dll" "Zapada.Fs.Gpt.dll"
 write_ext4_payload "$FAT32_DLL" "/Zapada.Fs.Fat32.dll" "Zapada.Fs.Fat32.dll"
 write_ext4_payload "$EXT_DLL" "/Zapada.Fs.Ext.dll" "Zapada.Fs.Ext.dll"

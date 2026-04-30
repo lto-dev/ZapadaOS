@@ -36,7 +36,6 @@
 #include <kernel/arch/x86_64/gdt.h>
 #include <kernel/arch/x86_64/idt.h>
 #include <kernel/arch/x86_64/pci.h>
-#include <kernel/drivers/virtio_blk.h>
 #include <kernel/fb_console.h>
 #include <kernel/gates/phase_gates.h>
 #include <kernel/initramfs/bootstrap.h>
@@ -374,14 +373,8 @@ void kernel_main(uint32_t mb_magic, mb2_info_t *mb_info)
     /* Foundation follow-up bring-up. */
     phase2c_init();
 
-    /*
-     * Probe and initialize the VirtIO block device.
-     * Must be called before the managed boot payload so that
-     * Zapada.BlockDev.ReadSector InternalCalls succeed.
-     */
+    /* PCI inventory remains a generic HAL diagnostic source for managed drivers. */
     pci_dump_inventory();
-    (void)virtio_blk_probe_and_init();
-    virtio_blk_dump_inventory();
 
     phase_gates_run();
 

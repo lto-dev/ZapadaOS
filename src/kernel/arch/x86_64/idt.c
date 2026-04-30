@@ -20,6 +20,21 @@ typedef struct idtr {
 extern void *isr_stub_table[32];
 extern void  isr_default_stub(void);
 extern void  irq0_stub(void);
+extern void  irq1_stub(void);
+extern void  irq2_stub(void);
+extern void  irq3_stub(void);
+extern void  irq4_stub(void);
+extern void  irq5_stub(void);
+extern void  irq6_stub(void);
+extern void  irq7_stub(void);
+extern void  irq8_stub(void);
+extern void  irq9_stub(void);
+extern void  irq10_stub(void);
+extern void  irq11_stub(void);
+extern void  irq12_stub(void);
+extern void  irq13_stub(void);
+extern void  irq14_stub(void);
+extern void  irq15_stub(void);
 
 static idt_entry_t g_idt[256];
 static idtr_t      g_idtr;
@@ -102,6 +117,21 @@ void idt_init(void)
      * timer_tick_handler() to advance the scheduler tick count.
      */
     idt_set_gate(0x20u, (void *)irq0_stub);
+    idt_set_gate(0x21u, (void *)irq1_stub);
+    idt_set_gate(0x22u, (void *)irq2_stub);
+    idt_set_gate(0x23u, (void *)irq3_stub);
+    idt_set_gate(0x24u, (void *)irq4_stub);
+    idt_set_gate(0x25u, (void *)irq5_stub);
+    idt_set_gate(0x26u, (void *)irq6_stub);
+    idt_set_gate(0x27u, (void *)irq7_stub);
+    idt_set_gate(0x28u, (void *)irq8_stub);
+    idt_set_gate(0x29u, (void *)irq9_stub);
+    idt_set_gate(0x2Au, (void *)irq10_stub);
+    idt_set_gate(0x2Bu, (void *)irq11_stub);
+    idt_set_gate(0x2Cu, (void *)irq12_stub);
+    idt_set_gate(0x2Du, (void *)irq13_stub);
+    idt_set_gate(0x2Eu, (void *)irq14_stub);
+    idt_set_gate(0x2Fu, (void *)irq15_stub);
 
     g_idtr.limit = (uint16_t)(sizeof(g_idt) - 1);
     g_idtr.base  = (uint64_t)(uintptr_t)&g_idt[0];

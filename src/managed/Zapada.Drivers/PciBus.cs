@@ -49,6 +49,21 @@ public static class PciBus
         return MmioRegion.OpenPciBar(deviceHandle, barIndex);
     }
 
+    public static int ReadConfig32(int deviceHandle, int registerOffset)
+    {
+        return DriverHal.PciReadConfig32(deviceHandle, registerOffset);
+    }
+
+    public static int EnableBusMaster(int deviceHandle)
+    {
+        return DriverHal.PciEnableBusMaster(deviceHandle);
+    }
+
+    public static int EnableIrq(int irqNumber)
+    {
+        return DriverHal.EnableIrq(irqNumber);
+    }
+
     private static int ReadInt32(byte[] buffer, int offset)
     {
         return (buffer[offset] & 0xFF)

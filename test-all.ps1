@@ -241,6 +241,7 @@ function Restore-ManagedCacheToBuild {
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Test.Hello.dll"); Target = (Join-Path (Get-Location).Path "build\hello.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Drivers.dll"); Target = (Join-Path (Get-Location).Path "build\drivers.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Drivers.VirtioBlock.dll"); Target = (Join-Path (Get-Location).Path "build\vblk.dll") },
+        @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Drivers.Usb.dll"); Target = (Join-Path (Get-Location).Path "build\usb.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Gpt.dll"); Target = (Join-Path (Get-Location).Path "build\gpt.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Storage.dll"); Target = (Join-Path (Get-Location).Path "build\storage.dll") },
         @{ Cache = (Join-Path $ManagedCacheRoot "Zapada.Fs.Fat32.dll"); Target = (Join-Path (Get-Location).Path "build\fat32.dll") },
@@ -410,6 +411,44 @@ function Invoke-VblkBuild {
     Copy-Item $vblkBinDll $vblkDest -Force
     $sz = (Get-Item $vblkDest).Length
     Write-Host "  Staged: $vblkDest ($sz bytes)." -ForegroundColor Gray
+    return $true
+}
+
+function Invoke-UsbBuild {
+    $usbProject = Join-Path (Get-Location).Path "src\managed\Zapada.Drivers.Usb\Zapada.Drivers.Usb.csproj"
+    $usbBinDll  = Join-Path (Get-Location).Path "src\managed\Zapada.Drivers.Usb\bin\$BuildConfig\net10.0\Zapada.Drivers.Usb.dll"
+    $usbDest    = Join-Path (Get-Location).Path "build\usb.dll"
+
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        Write-Host "  WARNING: 'dotnet' not found; Zapada.Drivers.Usb not built; USB storage gate will not pass." -ForegroundColor Yellow
+        return $true
+    }
+
+    if (-not (Test-Path $usbProject)) {
+        Write-Host "  WARNING: Zapada.Drivers.Usb.csproj not found; skipping USB driver build." -ForegroundColor Yellow
+        return $true
+    }
+
+    Write-Host "  Building USB xHCI/storage driver (Zapada.Drivers.Usb)..." -ForegroundColor Cyan
+    dotnet build $usbProject -c $BuildConfig --nologo 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: dotnet build Zapada.Drivers.Usb failed." -ForegroundColor Red
+        return $false
+    }
+
+    if (-not (Test-Path $usbBinDll)) {
+        Write-Host "  ERROR: $usbBinDll not found after build." -ForegroundColor Red
+        return $false
+    }
+
+    $buildDir = Join-Path (Get-Location).Path "build"
+    if (-not (Test-Path $buildDir)) {
+        New-Item -ItemType Directory -Path $buildDir | Out-Null
+    }
+
+    Copy-Item $usbBinDll $usbDest -Force
+    $sz = (Get-Item $usbDest).Length
+    Write-Host "  Staged: $usbDest ($sz bytes)." -ForegroundColor Gray
     return $true
 }
 
@@ -801,6 +840,12 @@ function Invoke-Build {
         return $false
     }
 
+    # Stage build/usb.dll AFTER the native clean/build sequence for the xHCI/USB storage gate.
+    # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
+    if (-not (Invoke-UsbBuild)) {
+        return $false
+    }
+
     # Stage build/gpt.dll AFTER the native clean/build sequence for Phase 3.1 D.2 GPT.DLL driver gate.
     # make-disk writes this payload into the Ext4 root and the FAT32 /mnt/c compatibility partition.
     if (-not (Invoke-GptBuild)) {
@@ -869,9 +914,11 @@ function Test-X86_64 {
     # a known-good GPT/FAT32 image with the expected ZAPADASK signature and TEST.DLL.
     $DISK = ".\build\disk.img"
     $DISK2 = ".\build\disk2.img"
-    Write-Host "  Creating VirtIO disk images for gate check..." -ForegroundColor Cyan
+    $USBDISK = ".\build\disk-usb.img"
+    Write-Host "  Creating VirtIO and USB storage images for gate check..." -ForegroundColor Cyan
     & .\scripts\make-disk.ps1 -Force | Out-Null
     & .\scripts\make-disk2.ps1 -Force | Out-Null
+    & .\scripts\make-disk-usb.ps1 -Force | Out-Null
 
     $ISO = ".\build\Zapada.iso"
     $LOG = ".\build\serial.log"
@@ -890,6 +937,7 @@ function Test-X86_64 {
     $logAbs  = (Resolve-Path ".\build").Path + "\serial.log"
     $diskAbs = (Resolve-Path ".\build").Path + "\disk.img"
     $disk2Abs = (Resolve-Path ".\build").Path + "\disk2.img"
+    $usbDiskAbs = (Resolve-Path ".\build").Path + "\disk-usb.img"
     $args = @(
         "-machine", "pc",
         "-cpu",     "qemu64",
@@ -906,14 +954,23 @@ function Test-X86_64 {
         $args += "-drive"
         $args += "file=$diskAbs,format=raw,if=none,id=d0"
         $args += "-device"
-        $args += "virtio-blk-pci,drive=d0,disable-modern=on,disable-legacy=off,addr=0x4"
+        $args += "virtio-blk-pci,drive=d0,disable-modern=off,disable-legacy=on,addr=0x4"
     }
 
     if (Test-Path $DISK2) {
         $args += "-drive"
         $args += "file=$disk2Abs,format=raw,if=none,id=d1"
         $args += "-device"
-        $args += "virtio-blk-pci,drive=d1,disable-modern=on,disable-legacy=off,addr=0x5"
+        $args += "virtio-blk-pci,drive=d1,disable-modern=off,disable-legacy=on,addr=0x5"
+    }
+
+    if (Test-Path $USBDISK) {
+        $args += "-drive"
+        $args += "file=$usbDiskAbs,format=raw,if=none,id=usb0"
+        $args += "-device"
+        $args += "qemu-xhci,id=xhci,msi=off,msix=off,addr=0x6"
+        $args += "-device"
+        $args += "usb-storage,drive=usb0,bus=xhci.0"
     }
 
     Write-Host "  Running QEMU (timeout: ${TimeoutSec}s)..." -ForegroundColor Gray
@@ -956,11 +1013,23 @@ function Test-X86_64 {
         "Phase 3.1 D.1 VirtioBlock initialized",
         "Phase 3.1 D.1 VirtioBlock gate",
         "Managed driver HAL smoke gate",
+        "USB xHCI driver initialized",
+        "USB xHCI bounded probe started",
+        "USB xHCI PCI identity",
+        "USB xHCI capability probe",
+        "USB xHCI IRQ deferred",
+        "USB xHCI port connected",
+        "USB xHCI bounded probe gate",
+        "USB storage deferred gate",
+        "USB storage intentionally not registered",
         "Phase 3.1 D.2 GPT initialized",
         "Phase 3.1 D.2 GPT gate",
         "Phase 3.1 D.3 FAT32 initialized",
         "Phase Ext4 driver initialized",
         "Phase Ext4 driver gate",
+        "Phase 3.1 D.4 VFS initialized",
+        "Phase 3.1 D.4 VFS gate",
+        "Phase VFS redesign gate",
         "Phase Ext4 root gate",
         "Phase Ext4 read gate",
         "Phase Ext4 fstab gate",
@@ -987,8 +1056,6 @@ function Test-X86_64 {
         "Shell entropy gate",
         "Shell fstab cat command",
         "Shell gate",
-        "Phase 3.1 D.4 VFS initialized",
-        "Phase 3.1 D.4 VFS gate",
         "Boot complete gate GateD",
         "System halted after ZACLR boot validation path"
     )
@@ -1026,12 +1093,25 @@ function Test-X86_64 {
         "[Gate] Phase3B",
         "[Boot] VirtioBlock managed bridge initialized",
         "[Gate] Phase31-D1",
+        "[Gate] Phase-ManagedVirtioBlock",
         "[Gate] Phase-DriverHal",
+        "[Boot] USB xHCI/mass-storage driver initialized",
+        "[USB] xHCI controller found; running bounded probe only",
+        "[USB] probe stage=pci vendor=0x1b36 device=0x000d",
+        "[USB] probe stage=caps mmio-size=",
+        "[USB] probe stage=irq line=10 deferred",
+        "connected=yes enabled=yes speed=4",
+        "[Gate] Phase-XhciProbe",
+        "[Gate] Phase-UsbStorageDeferred",
+        "[USB] no USB mass-storage block device registered",
         "[Boot] GPT driver initialized",
         "[Gate] Phase31-D2",
         "[Boot] FAT32 driver initialized",
         "[Boot] Ext4 driver initialized",
         "[Gate] Phase-Ext4Driver",
+        "[Boot] VFS initialized",
+        "[Gate] Phase31-D4",
+        "[Gate] Phase-VfsRedesign",
         "[Gate] Phase-Ext4Root",
         "[Gate] Phase-Ext4Read",
         "[Gate] Phase-Ext4Fstab",
@@ -1046,7 +1126,9 @@ function Test-X86_64 {
         "[Shell] $ mount",
         "[Shell] $ drivers",
         "driver                 state       uses provides",
-        "virtio-blk started 2 block.device:vda,hal.smoke",
+        "virtio-blk started 2 block.device:vda,block.device:vdb,hal.smoke",
+        "xhci bound 0 usb.bus:xhci0",
+        "usb-storage failed 0 block.device:sda",
         "[Shell] $ block",
         "block                  driver sector-size sectors flags",
         "vda virtio-blk 512",
@@ -1079,15 +1161,15 @@ function Test-X86_64 {
         "/proc procfs procfs Zapada process namespace",
         "[Shell] $ cat /proc/drivers",
         "driver state uses provides requires binds",
-        "virtio-blk started 2 block.device:vda,hal.smoke",
+        "virtio-blk started 2 block.device:vda,block.device:vdb,hal.smoke",
+        "xhci bound 0 usb.bus:xhci0",
+        "usb-storage failed 0 block.device:sda",
         "[Shell] $ entropy",
         "[Shell] entropy source: /dev/urandom (provisional non-cryptographic)",
         "[Shell] entropy bytes:",
         "[Gate] Phase-Entropy",
         "[Shell] $ cat /etc/fstab",
         "[Gate] Phase-Shell",
-        "[Boot] VFS initialized",
-        "[Gate] Phase31-D4",
         "[Gate] GateD",
         "System halted after ZACLR boot validation path."
     )

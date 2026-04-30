@@ -32,9 +32,39 @@ public sealed class DmaBuffer
         return DriverHal.DmaBufferRead32(Handle, offset);
     }
 
+    public int Read16(int offset)
+    {
+        return DriverHal.DmaBufferRead16(Handle, offset);
+    }
+
+    public int Read8(int offset)
+    {
+        return DriverHal.DmaBufferRead8(Handle, offset);
+    }
+
     public int Write32(int offset, int value)
     {
         return DriverHal.DmaBufferWrite32(Handle, offset, value);
+    }
+
+    public int Write16(int offset, int value)
+    {
+        return DriverHal.DmaBufferWrite16(Handle, offset, value);
+    }
+
+    public int Write8(int offset, int value)
+    {
+        return DriverHal.DmaBufferWrite8(Handle, offset, value);
+    }
+
+    public int CopyFrom(int offset, byte[] source, int sourceOffset, int count)
+    {
+        return DriverHal.DmaBufferCopyFrom(Handle, offset, source, sourceOffset, count);
+    }
+
+    public int CopyTo(int offset, byte[] destination, int destinationOffset, int count)
+    {
+        return DriverHal.DmaBufferCopyTo(Handle, offset, destination, destinationOffset, count);
     }
 
     public int Free()

@@ -37,30 +37,6 @@ static uint8_t pci_cfg_read8(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t reg)
     return (uint8_t)((dword >> ((reg & 3u) * 8u)) & 0xFFu);
 }
 
-static uint64_t pci_bar_read_mmio_base(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t bar_index)
-{
-    uint8_t  reg;
-    uint32_t low;
-    uint32_t high;
-
-    if (bar_index >= 6u) {
-        return 0u;
-    }
-
-    reg = (uint8_t)(0x10u + (bar_index * 4u));
-    low = pci_cfg_read32(bus, dev, fn, reg);
-    if ((low & 1u) != 0u) {
-        return 0u;
-    }
-
-    if (((low >> 1) & 3u) == 2u && bar_index < 5u) {
-        high = pci_cfg_read32(bus, dev, fn, (uint8_t)(reg + 4u));
-        return ((uint64_t)high << 32) | (uint64_t)(low & 0xFFFFFFF0u);
-    }
-
-    return (uint64_t)(low & 0xFFFFFFF0u);
-}
-
 static int pci_device_exists(uint8_t bus, uint8_t dev, uint8_t fn, uint32_t *id_out)
 {
     uint32_t id_reg;
@@ -203,13 +179,6 @@ void pci_dump_inventory(void)
                 pci_write_hex2(class_code);
                 pci_write_hex2(subclass);
                 pci_write_hex2(prog_if);
-                if (vendor == PCI_VENDOR_VIRTIO) {
-                    serial_write(" virtio");
-                    if (device == PCI_DEVICE_VIRTIO_BLK_LEGACY ||
-                        device == PCI_DEVICE_VIRTIO_BLK_MODERN) {
-                        serial_write(" block");
-                    }
-                }
                 serial_write("\n");
                 count++;
             }
@@ -219,154 +188,5 @@ void pci_dump_inventory(void)
     serial_write("PCI inventory    : ");
     serial_write_dec((uint64_t)count);
     serial_write(" device functions\n");
-}
-
-/*
- * pci_virtio_blk_probe - Scan PCI configuration space for a VirtIO block device.
- *
- * Accepts both legacy (0x1001) and modern (0x1042) device IDs.
- * Sets *bar0_out to the raw BAR0 config-space value (caller decodes type bits).
- */
-int pci_virtio_blk_probe_nth(uint32_t target_index, uint32_t *bar0_out)
-{
-    uint16_t bus;
-    uint32_t matched;
-
-    matched = 0u;
-
-    for (bus = 0u; bus < 256u; bus++) {
-        uint8_t dev;
-
-        for (dev = 0u; dev < 32u; dev++) {
-            int fn_limit;
-            uint8_t fn;
-
-            fn_limit = pci_function_limit((uint8_t)bus, dev);
-            for (fn = 0u; fn < (uint8_t)fn_limit; fn++) {
-                uint32_t id_reg;
-                uint16_t vendor;
-                uint16_t device;
-
-                if (!pci_device_exists((uint8_t)bus, dev, fn, &id_reg)) {
-                    continue;
-                }
-
-                vendor = (uint16_t)(id_reg & 0xFFFFu);
-                device = (uint16_t)((id_reg >> 16) & 0xFFFFu);
-
-                if (vendor != PCI_VENDOR_VIRTIO) {
-                    continue;
-                }
-                if (device != PCI_DEVICE_VIRTIO_BLK_LEGACY &&
-                    device != PCI_DEVICE_VIRTIO_BLK_MODERN) {
-                    continue;
-                }
-
-                if (matched == target_index) {
-                    pci_enable_device_io_memory_busmaster((uint8_t)bus, dev, fn);
-                    *bar0_out = pci_cfg_read32((uint8_t)bus, dev, fn, 0x10u);
-                    return 0;
-                }
-
-                matched++;
-            }
-        }
-    }
-
-    return -1;
-}
-
-int pci_virtio_blk_probe(uint32_t *bar0_out)
-{
-    return pci_virtio_blk_probe_nth(0u, bar0_out);
-}
-
-int pci_virtio_blk_probe_modern(uint64_t *common_cfg_out,
-                                uint64_t *notify_cfg_out,
-                                uint64_t *device_cfg_out,
-                                uint32_t *notify_off_multiplier_out)
-{
-    uint16_t bus;
-
-    if (common_cfg_out == (uint64_t *)0 || notify_cfg_out == (uint64_t *)0 ||
-        device_cfg_out == (uint64_t *)0 ||
-        notify_off_multiplier_out == (uint32_t *)0) {
-        return -1;
-    }
-
-    for (bus = 0u; bus < 256u; bus++) {
-        uint8_t dev;
-
-        for (dev = 0u; dev < 32u; dev++) {
-            int fn_limit;
-            uint8_t fn;
-
-            fn_limit = pci_function_limit((uint8_t)bus, dev);
-            for (fn = 0u; fn < (uint8_t)fn_limit; fn++) {
-                uint32_t id_reg;
-                uint16_t vendor;
-                uint16_t device_id;
-                uint16_t status;
-                uint8_t cap_ptr;
-
-                if (!pci_device_exists((uint8_t)bus, dev, fn, &id_reg)) {
-                    continue;
-                }
-
-                vendor = (uint16_t)(id_reg & 0xFFFFu);
-                device_id = (uint16_t)((id_reg >> 16) & 0xFFFFu);
-                if (vendor != PCI_VENDOR_VIRTIO || device_id != PCI_DEVICE_VIRTIO_BLK_MODERN) {
-                    continue;
-                }
-
-                pci_enable_device_io_memory_busmaster((uint8_t)bus, dev, fn);
-
-                status = pci_cfg_read16((uint8_t)bus, dev, fn, 0x06u);
-                if ((status & 0x10u) == 0u) {
-                    continue;
-                }
-
-                cap_ptr = pci_cfg_read8((uint8_t)bus, dev, fn, 0x34u);
-                while (cap_ptr >= 0x40u) {
-                    uint8_t cap_id;
-                    uint8_t next;
-                    uint8_t cfg_type;
-                    uint8_t bar;
-                    uint32_t offset;
-                    uint64_t bar_base;
-
-                    cap_id = pci_cfg_read8((uint8_t)bus, dev, fn, cap_ptr + 0u);
-                    next   = pci_cfg_read8((uint8_t)bus, dev, fn, cap_ptr + 1u);
-                    if (cap_id == 0x09u) {
-                        cfg_type = pci_cfg_read8((uint8_t)bus, dev, fn, cap_ptr + 3u);
-                        bar      = pci_cfg_read8((uint8_t)bus, dev, fn, cap_ptr + 4u);
-                        offset   = pci_cfg_read32((uint8_t)bus, dev, fn, (uint8_t)(cap_ptr + 8u));
-                        bar_base = pci_bar_read_mmio_base((uint8_t)bus, dev, fn, bar);
-                        if (bar_base != 0u) {
-                            if (cfg_type == 1u) {
-                                *common_cfg_out = bar_base + (uint64_t)offset;
-                            } else if (cfg_type == 2u) {
-                                *notify_cfg_out = bar_base + (uint64_t)offset;
-                                *notify_off_multiplier_out = pci_cfg_read32((uint8_t)bus, dev, fn, (uint8_t)(cap_ptr + 16u));
-                            } else if (cfg_type == 4u) {
-                                *device_cfg_out = bar_base + (uint64_t)offset;
-                            }
-                        }
-                    }
-
-                    if (next == 0u || next == cap_ptr) {
-                        break;
-                    }
-                    cap_ptr = next;
-                }
-
-                if (*common_cfg_out != 0u && *notify_cfg_out != 0u && *device_cfg_out != 0u) {
-                    return 0;
-                }
-            }
-        }
-    }
-
-    return -1;
 }
 

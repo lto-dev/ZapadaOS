@@ -12,11 +12,9 @@
  * Gate output checked by test-all.ps1:
  *   "[Gate] Phase31-D2"  — GPT managed driver DllMain executed successfully
  *
- * The driver registers itself here.  Full GPT partition table reading and
- * CRC32 header validation are in GptReader.cs.  In Phase 3.1 D.2 the reader
- * is initialized but only emits the gate; no BootLoader API calls are made
- * back to the native layer from within Initialize().  Cross-layer calls are
- * the subject of Phase 3.1 D.3+ (FAT32 managed driver) and D.4 (VFS).
+ * GPT partition discovery now runs through Zapada.Storage.PartitionScanner over
+ * registered managed block devices. This assembly remains as the GPT driver
+ * identity/gate while the active scanner is shared by all block backends.
  */
 
 using System;

@@ -12,14 +12,13 @@
  * Gate output checked by test-all.ps1:
  *   "[Gate] Phase31-D1"  — VirtioBlock driver DllMain executed successfully
  *
- * The driver does not perform VirtIO I/O in this initial version.
- * Full VirtIO block device access is performed via the Zapada.BlockDev
- * InternalCalls (ReadSector / WriteSector) which call the kernel C driver
- * directly.  This managed DLL registers itself as a driver identity entry
- * point; the actual block I/O continues through the native path for now.
+ * The active VirtIO block I/O path is managed.  Initialize() registers the
+ * driver identity, discovers modern VirtIO PCI devices through DriverHal, and
+ * registers vda/vdb BlockDevice instances backed by managed MMIO/DMA queues.
  */
 
 using System;
+using Zapada.Storage;
 
 namespace Zapada.Drivers
 {
@@ -38,13 +37,19 @@ namespace Zapada.Drivers
             DriverRegistry.Register(
                 "virtio-blk",
                 "Zapada.Drivers.VirtioBlock",
-                "block.device:vda,hal.smoke",
-                "Zapada.Drivers.Hal",
+                "block.device:vda,block.device:vdb,hal.smoke",
+                "Zapada.Drivers.Hal,Zapada.Storage",
                 "pci:1af4:1001,pci:1af4:1042",
                 DriverState.Started);
 
             Console.Write("[Boot] VirtioBlock managed bridge initialized\n");
             Console.Write("[Gate] Phase31-D1\n");
+
+            int managedDevices = VirtioBlockManager.RegisterManagedDevices();
+            if (managedDevices <= 0)
+            {
+                Console.Write("[Boot] VirtioBlock managed device registration unavailable\n");
+            }
 
             if (VirtioBlockProbe.RunSmoke() == 0)
             {

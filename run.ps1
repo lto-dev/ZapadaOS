@@ -81,6 +81,7 @@ if ($Arch -eq "x86_64") {
 
     $DISK = ".\build\disk.img"
     $DISK2 = ".\build\disk2.img"
+    $USBDISK = ".\build\disk-usb.img"
 
     $qemuArgs = @(
         "-machine", "pc",
@@ -98,21 +99,31 @@ if ($Arch -eq "x86_64") {
     )
 
     # Attach VirtIO block disk image if present (Phase 3A Part 2+).
-    # x86_64 currently uses the legacy/transitional I/O-port transport path.
+    # x86_64 now exposes modern VirtIO PCI so the managed driver can own MMIO/DMA.
     if (Test-Path $DISK) {
         $qemuArgs += "-drive"
         $qemuArgs += "file=$DISK,format=raw,if=none,id=d0"
         $qemuArgs += "-device"
-        $qemuArgs += "virtio-blk-pci,drive=d0,disable-modern=on,disable-legacy=off,addr=0x4"
-        Write-Host "  Disk image  : $DISK (VirtIO PCI legacy/transitional)" -ForegroundColor Gray
+        $qemuArgs += "virtio-blk-pci,drive=d0,disable-modern=off,disable-legacy=on,addr=0x4"
+        Write-Host "  Disk image  : $DISK (VirtIO PCI modern MMIO)" -ForegroundColor Gray
     }
 
     if (Test-Path $DISK2) {
         $qemuArgs += "-drive"
         $qemuArgs += "file=$DISK2,format=raw,if=none,id=d1"
         $qemuArgs += "-device"
-        $qemuArgs += "virtio-blk-pci,drive=d1,disable-modern=on,disable-legacy=off,addr=0x5"
-        Write-Host "  Disk image  : $DISK2 (VirtIO PCI legacy/transitional)" -ForegroundColor Gray
+        $qemuArgs += "virtio-blk-pci,drive=d1,disable-modern=off,disable-legacy=on,addr=0x5"
+        Write-Host "  Disk image  : $DISK2 (VirtIO PCI modern MMIO)" -ForegroundColor Gray
+    }
+
+    if (Test-Path $USBDISK) {
+        $qemuArgs += "-drive"
+        $qemuArgs += "file=$USBDISK,format=raw,if=none,id=usb0"
+        $qemuArgs += "-device"
+        $qemuArgs += "qemu-xhci,id=xhci,msi=off,msix=off,addr=0x6"
+        $qemuArgs += "-device"
+        $qemuArgs += "usb-storage,drive=usb0,bus=xhci.0"
+        Write-Host "  Disk image  : $USBDISK (USB mass storage through qemu-xhci)" -ForegroundColor Gray
     }
 
     if ($WaitForGdb) {

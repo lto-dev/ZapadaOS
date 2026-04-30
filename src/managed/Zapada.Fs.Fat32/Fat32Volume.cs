@@ -39,27 +39,6 @@ internal sealed class Fat32Volume : MountedVolume
     private int _scanAttr;
     private string _scanName = "";
 
-    public int Initialize(int partLba)
-    {
-        if (partLba < 0)
-            return StorageStatus.InvalidArgument;
-
-        BlockDevice device = BlockDeviceRegistry.FindByName("vda");
-        if (device == null)
-            return StorageStatus.NotMounted;
-
-        BlockDeviceInfo info = device.GetInfo();
-        long sectorCount = info == null ? 0 : info.SectorCount - partLba;
-        if (sectorCount <= 0)
-            sectorCount = 2147483647L - partLba;
-        if (sectorCount <= 0)
-            return StorageStatus.InvalidArgument;
-
-        BlockDevicePartitionView partition = new BlockDevicePartitionView();
-        partition.Initialize(device, "vda-fat32", (long)partLba, sectorCount, 2);
-        return Initialize(partition);
-    }
-
     public int Initialize(PartitionView partition)
     {
         if (partition == null)

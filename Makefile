@@ -353,9 +353,6 @@ C_SOURCES_AA64 := \
     $(SRC_DIR)/kernel/syscall/syscall.c                 \
     $(SRC_DIR)/kernel/ipc/ipc.c                         \
     $(SRC_DIR)/kernel/irq/irq_router.c                  \
-    $(SRC_DIR)/kernel/arch/aarch64/virtio_mmio.c        \
-    $(SRC_DIR)/kernel/drivers/virtio.c                  \
-    $(SRC_DIR)/kernel/drivers/virtio_blk.c              \
     $(SRC_DIR)/kernel/gates/phase_gates.c               \
     $(SRC_DIR)/kernel/phase2b.c                         \
     $(SRC_DIR)/kernel/phase2c.c                         \
@@ -448,6 +445,7 @@ C_SOURCES := \
     $(SRC_DIR)/kernel/arch/x86_64/pic.c             \
     $(SRC_DIR)/kernel/arch/x86_64/pit.c             \
     $(SRC_DIR)/kernel/arch/x86_64/paging.c          \
+    $(SRC_DIR)/kernel/arch/x86_64/irq.c             \
     $(SRC_DIR)/kernel/mm/pmm.c                      \
     $(SRC_DIR)/kernel/mm/heap.c                     \
     $(SRC_DIR)/kernel/process/process.c             \
@@ -458,8 +456,6 @@ C_SOURCES := \
     $(SRC_DIR)/kernel/ipc/ipc.c                     \
     $(SRC_DIR)/kernel/irq/irq_router.c              \
     $(SRC_DIR)/kernel/arch/x86_64/pci.c             \
-    $(SRC_DIR)/kernel/drivers/virtio.c               \
-    $(SRC_DIR)/kernel/drivers/virtio_blk.c           \
     $(SRC_DIR)/kernel/gates/phase_gates.c           \
     $(SRC_DIR)/kernel/phase2b.c                     \
     $(SRC_DIR)/kernel/phase2c.c                     \
@@ -724,6 +720,8 @@ $(INITRAMFS_IMG): | $(BUILD_DIR)
 	elif [ -f $(SRC_DIR)/managed/Zapada.Drivers/bin/Release/net10.0/Zapada.Drivers.dll ]; then cp $(SRC_DIR)/managed/Zapada.Drivers/bin/Release/net10.0/Zapada.Drivers.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.dll; fi
 	@if [ -f $(BUILD_DIR)/vblk.dll ]; then cp $(BUILD_DIR)/vblk.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.VirtioBlock.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Drivers.VirtioBlock/bin/Release/net10.0/Zapada.Drivers.VirtioBlock.dll ]; then cp $(SRC_DIR)/managed/Zapada.Drivers.VirtioBlock/bin/Release/net10.0/Zapada.Drivers.VirtioBlock.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.VirtioBlock.dll; fi
+	@if [ -f $(BUILD_DIR)/usb.dll ]; then cp $(BUILD_DIR)/usb.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.Usb.dll; \
+	elif [ -f $(SRC_DIR)/managed/Zapada.Drivers.Usb/bin/Release/net10.0/Zapada.Drivers.Usb.dll ]; then cp $(SRC_DIR)/managed/Zapada.Drivers.Usb/bin/Release/net10.0/Zapada.Drivers.Usb.dll $(BUILD_DIR)/initramfs_root/Zapada.Drivers.Usb.dll; fi
 	@if [ -f $(BUILD_DIR)/gpt.dll ]; then cp $(BUILD_DIR)/gpt.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Gpt.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Gpt/bin/Release/net10.0/Zapada.Fs.Gpt.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Gpt/bin/Release/net10.0/Zapada.Fs.Gpt.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Gpt.dll; fi
 	@if [ -f $(BUILD_DIR)/storage.dll ]; then cp $(BUILD_DIR)/storage.dll $(BUILD_DIR)/initramfs_root/Zapada.Storage.dll; \

@@ -5,6 +5,8 @@
 
 struct zaclr_native_Zapada_Drivers_Hal_DriverHal
 {
+    static struct zaclr_result EnableIrq___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
+
     static struct zaclr_result CreateChannel___STATIC__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result DestroyChannel___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result TrySend___STATIC__I4__I4__I4__SZARRAY_U1__I4(struct zaclr_native_call_frame& frame);
@@ -16,10 +18,15 @@ struct zaclr_native_Zapada_Drivers_Hal_DriverHal
     static struct zaclr_result PciReadConfig32___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result PciReadBar32___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result PciOpenBar___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result PciEnableBusMaster___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
 
     static struct zaclr_result MmioRead32___STATIC__I4__I8__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result MmioWrite32___STATIC__I4__I8__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result MmioRegionSize___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result MmioRegionRead8___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result MmioRegionWrite8___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result MmioRegionRead16___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result MmioRegionWrite16___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result MmioRegionRead32___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result MmioRegionWrite32___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result CloseMmioRegion___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
@@ -32,8 +39,14 @@ struct zaclr_native_Zapada_Drivers_Hal_DriverHal
     static struct zaclr_result FreeDmaBuffer___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result DmaBufferSize___STATIC__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result DmaBufferPhysicalAddress___STATIC__I8__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferRead8___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferWrite8___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferRead16___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferWrite16___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result DmaBufferRead32___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result DmaBufferWrite32___STATIC__I4__I4__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferCopyFrom___STATIC__I4__I4__I4__SZARRAY_U1__I4__I4(struct zaclr_native_call_frame& frame);
+    static struct zaclr_result DmaBufferCopyTo___STATIC__I4__I4__I4__SZARRAY_U1__I4__I4(struct zaclr_native_call_frame& frame);
 
     static struct zaclr_result SubscribeIrq___STATIC__I4__I4__I4(struct zaclr_native_call_frame& frame);
     static struct zaclr_result UnsubscribeIrq___STATIC__I4__I4(struct zaclr_native_call_frame& frame);

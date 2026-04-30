@@ -24,6 +24,7 @@
     <ProjectReference Include="../Zapada.Test.Hello/Zapada.Test.Hello.csproj" />
     <ProjectReference Include="../Zapada.Drivers/Zapada.Drivers.csproj" />
     <ProjectReference Include="../Zapada.Drivers.VirtioBlock/Zapada.Drivers.VirtioBlock.csproj" />
+    <ProjectReference Include="../Zapada.Drivers.Usb/Zapada.Drivers.Usb.csproj" />
     <ProjectReference Include="../Zapada.Fs.Gpt/Zapada.Fs.Gpt.csproj" />
     <ProjectReference Include="../Zapada.Fs.Fat32/Zapada.Fs.Fat32.csproj" />
     <ProjectReference Include="../Zapada.Fs.Ext4/Zapada.Fs.Ext4.csproj" />

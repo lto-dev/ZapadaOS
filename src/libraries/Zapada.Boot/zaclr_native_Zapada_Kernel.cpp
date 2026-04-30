@@ -35,19 +35,6 @@ struct zaclr_result zaclr_native_Zapada_Kernel::GetTickCount___STATIC__I4(struct
             : 0u));
 }
 
-struct zaclr_result zaclr_native_Zapada_Kernel::SetBootPartLba___STATIC__VOID__I4(struct zaclr_native_call_frame& frame)
-{
-    int32_t value;
-    struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &value);
-    if (status.status != ZACLR_STATUS_OK)
-    {
-        return status;
-    }
-
-    zaclr_boot_shared_set_boot_part_lba(value);
-    return zaclr_native_call_frame_set_void(&frame);
-}
-
 struct zaclr_result zaclr_native_Zapada_Kernel::GetBootCommandLine___STATIC__STRING(struct zaclr_native_call_frame& frame)
 {
     const char* command_line;

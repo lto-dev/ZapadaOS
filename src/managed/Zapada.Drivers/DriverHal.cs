@@ -18,6 +18,9 @@ public static class DriverHal
     public const int IrqTimer = 0;
 
     [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int EnableIrq(int irqNumber);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int CreateChannel();
 
     [MethodImpl(MethodImplOptions.InternalCall)]
@@ -48,6 +51,9 @@ public static class DriverHal
     public static extern int PciOpenBar(int deviceHandle, int barIndex);
 
     [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int PciEnableBusMaster(int deviceHandle);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int MmioRead32(long baseAddress, int offset);
 
     [MethodImpl(MethodImplOptions.InternalCall)]
@@ -55,6 +61,18 @@ public static class DriverHal
 
     [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int MmioRegionSize(int regionHandle);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int MmioRegionRead8(int regionHandle, int offset);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int MmioRegionWrite8(int regionHandle, int offset, int value);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int MmioRegionRead16(int regionHandle, int offset);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int MmioRegionWrite16(int regionHandle, int offset, int value);
 
     [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int MmioRegionRead32(int regionHandle, int offset);
@@ -87,10 +105,28 @@ public static class DriverHal
     public static extern long DmaBufferPhysicalAddress(int handle);
 
     [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferRead8(int handle, int offset);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferWrite8(int handle, int offset, int value);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferRead16(int handle, int offset);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferWrite16(int handle, int offset, int value);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int DmaBufferRead32(int handle, int offset);
 
     [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int DmaBufferWrite32(int handle, int offset, int value);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferCopyFrom(int handle, int offset, byte[] source, int sourceOffset, int count);
+
+    [MethodImpl(MethodImplOptions.InternalCall)]
+    public static extern int DmaBufferCopyTo(int handle, int offset, byte[] destination, int destinationOffset, int count);
 
     [MethodImpl(MethodImplOptions.InternalCall)]
     public static extern int SubscribeIrq(int irqNumber, int channelHandle);

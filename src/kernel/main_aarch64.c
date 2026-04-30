@@ -33,7 +33,6 @@
 #include <kernel/arch/aarch64/uart.h>
 #include <kernel/arch/aarch64/exception.h>
 #include <kernel/arch/aarch64/fdt.h>
-#include <kernel/drivers/virtio_blk.h>
 #include <kernel/gates/phase_gates.h>
 #include <kernel/console.h>
 #include <kernel/initramfs/bootstrap.h>
@@ -263,13 +262,6 @@ void kernel_main_aarch64(uint64_t fdt_base)
     __asm__ volatile ("msr daifclr, #2");
     __asm__ volatile ("isb");
     phase2c_init();
-
-    /*
-     * Probe and initialize the VirtIO block device.
-     * Must be called before the managed boot payload so that
-     * Zapada.BlockDev.ReadSector InternalCalls succeed.
-     */
-    (void)virtio_blk_probe_and_init();
 
     phase_gates_run();
 

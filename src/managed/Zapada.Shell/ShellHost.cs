@@ -23,6 +23,7 @@ public static class ShellHost
         RunBootSmokeCommand("ls /");
         RunBootSmokeCommand("ls /mnt/c");
         RunBootSmokeCommand("ls /mnt/d");
+        RunBootSmokeCommand("ls /mnt/u");
         RunBootSmokeCommand("ls /dev");
         RunBootSmokeCommand("ls /proc");
         RunBootSmokeCommand("cat /proc/mounts");

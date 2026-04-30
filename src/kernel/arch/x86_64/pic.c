@@ -122,7 +122,9 @@ void pic_unmask_irq(uint32_t irq)
 {
     uint16_t port;
     uint8_t  mask;
+    uint32_t original_irq;
 
+    original_irq = irq;
     if (irq < 8u) {
         port = PIC_MASTER_DATA;
     } else {
@@ -133,5 +135,11 @@ void pic_unmask_irq(uint32_t irq)
     mask = inb(port);
     mask &= (uint8_t)(~(1u << irq));
     outb(port, mask);
+
+    if (original_irq >= 8u) {
+        mask = inb(PIC_MASTER_DATA);
+        mask &= (uint8_t)(~(1u << 2u));
+        outb(PIC_MASTER_DATA, mask);
+    }
 }
 

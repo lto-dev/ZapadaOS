@@ -1,10 +1,26 @@
 global isr_stub_table
 global isr_default_stub
 global irq0_stub
+global irq1_stub
+global irq2_stub
+global irq3_stub
+global irq4_stub
+global irq5_stub
+global irq6_stub
+global irq7_stub
+global irq8_stub
+global irq9_stub
+global irq10_stub
+global irq11_stub
+global irq12_stub
+global irq13_stub
+global irq14_stub
+global irq15_stub
 
 extern isr_exception_handler
 extern isr_default_handler
 extern irq0_timer_c_handler
+extern x86_irq_c_handler
 
 section .text
 bits 64
@@ -90,6 +106,32 @@ irq0_stub:
     call irq0_timer_c_handler
     POP_REGS
     iretq
+
+%macro IRQ_STUB 1
+irq%1_stub:
+    cld
+    PUSH_REGS
+    mov rdi, %1
+    call x86_irq_c_handler
+    POP_REGS
+    iretq
+%endmacro
+
+IRQ_STUB 1
+IRQ_STUB 2
+IRQ_STUB 3
+IRQ_STUB 4
+IRQ_STUB 5
+IRQ_STUB 6
+IRQ_STUB 7
+IRQ_STUB 8
+IRQ_STUB 9
+IRQ_STUB 10
+IRQ_STUB 11
+IRQ_STUB 12
+IRQ_STUB 13
+IRQ_STUB 14
+IRQ_STUB 15
 
 ISR_NO_ERROR 0
 ISR_NO_ERROR 1

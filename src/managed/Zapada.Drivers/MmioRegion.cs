@@ -29,9 +29,29 @@ public sealed class MmioRegion
         return DriverHal.MmioRegionRead32(Handle, offset);
     }
 
+    public int Read16(int offset)
+    {
+        return DriverHal.MmioRegionRead16(Handle, offset);
+    }
+
+    public int Read8(int offset)
+    {
+        return DriverHal.MmioRegionRead8(Handle, offset);
+    }
+
     public int Write32(int offset, int value)
     {
         return DriverHal.MmioRegionWrite32(Handle, offset, value);
+    }
+
+    public int Write16(int offset, int value)
+    {
+        return DriverHal.MmioRegionWrite16(Handle, offset, value);
+    }
+
+    public int Write8(int offset, int value)
+    {
+        return DriverHal.MmioRegionWrite8(Handle, offset, value);
     }
 
     public int Close()

@@ -124,6 +124,22 @@ namespace Zapada.Boot
             }
 
             /* ------------------------------------------------------------ */
+            /* Step D.1b: initialize USB xHCI/mass-storage driver.          */
+            /* ------------------------------------------------------------ */
+
+            Console.Write("[Boot] loading: Zapada.Drivers.Usb\n");
+            if (Zapada.Drivers.Usb.DllMain.Initialize() == 0)
+            {
+                Console.Write("[Boot] USB Initialize failed\n");
+                Zapada.Drivers.DriverRegistry.SetState("xhci", Zapada.Drivers.DriverState.Failed);
+                Zapada.Drivers.DriverRegistry.SetState("usb-storage", Zapada.Drivers.DriverState.Failed);
+            }
+            else
+            {
+                /* The USB manager owns final xHCI and usb-storage state. */
+            }
+
+            /* ------------------------------------------------------------ */
             /* Step D.2: initialize GPT driver.                             */
             /* ------------------------------------------------------------ */
 
@@ -275,6 +291,22 @@ namespace Zapada.Boot
                 Zapada.Drivers.DriverState.Loaded);
 
             Zapada.Drivers.DriverRegistry.Register(
+                "xhci",
+                "Zapada.Drivers.Usb",
+                "usb.bus:xhci0",
+                "Zapada.Drivers.Hal",
+                "pci:class:0c0330",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
+                "usb-storage",
+                "Zapada.Drivers.Usb",
+                "block.device:sda",
+                "usb.bus:xhci0,Zapada.Storage",
+                "usb:08:06:50",
+                Zapada.Drivers.DriverState.Loaded);
+
+            Zapada.Drivers.DriverRegistry.Register(
                 "gpt",
                 "Zapada.Fs.Gpt",
                 "partition.table:gpt",
@@ -319,7 +351,7 @@ namespace Zapada.Boot
         {
             Console.Write("[Boot] Persistent storage: scanning...\n");
 
-            BlockDevice bootDevice = EnsureNativeBlockDevices(0);
+            BlockDevice bootDevice = EnsureBlockDevices(0);
             if (bootDevice == null)
             {
                 Console.Write("[Boot] no boot block device registered\n");
@@ -381,70 +413,14 @@ namespace Zapada.Boot
             MountConfiguredFstabVolumes();
         }
 
-        private static BlockDevice EnsureNativeBlockDevices(long minimumSectorCount)
+        private static BlockDevice EnsureBlockDevices(long minimumSectorCount)
         {
             BlockDevice existing = BlockDeviceRegistry.FindByName("vda");
             if (existing != null)
                 return existing;
 
-            int nativeCount = Zapada.BlockDev.DeviceCount();
-            if (nativeCount <= 0)
-            {
-                long fallbackSectors = Zapada.BlockDev.SectorCount();
-                if (fallbackSectors <= 0)
-                    fallbackSectors = minimumSectorCount;
-                if (fallbackSectors < 0)
-                    fallbackSectors = 0;
-                if (fallbackSectors > 0)
-                    nativeCount = 1;
-            }
-
-            int registered = 0;
-            for (int i = 0; i < nativeCount; i++)
-            {
-                string name = NativeBlockDeviceName(i);
-                long sectorCount = Zapada.BlockDev.SectorCountForDevice(i);
-                if (i == 0 && sectorCount <= 0)
-                    sectorCount = Zapada.BlockDev.SectorCount();
-                if (sectorCount <= 0)
-                    sectorCount = minimumSectorCount;
-                if (sectorCount < 0)
-                    sectorCount = 0;
-
-                NativeBridgeBlockDevice bridge = new NativeBridgeBlockDevice(name, "virtio-blk", 512, sectorCount, i);
-                int rc = BlockDeviceRegistry.Register(bridge);
-                if (rc == StorageStatus.Ok || rc == StorageStatus.AlreadyExists)
-                {
-                    Zapada.Drivers.DriverRegistry.AddUse("virtio-blk");
-                    Console.Write("[Storage] block registered: ");
-                    Console.Write(name);
-                    Console.Write(" native-bridge\n");
-                    registered++;
-                }
-                else
-                {
-                    Console.Write("[Storage] block register failed rc=");
-                    Console.Write(rc);
-                    Console.Write("\n");
-                }
-            }
-
-            if (registered > 0)
-            {
-                Console.Write("[Gate] Phase-BlockRegistry\n");
-                return BlockDeviceRegistry.FindByName("vda");
-            }
-
+            Console.Write("[Boot] managed vda block device not registered\n");
             return null;
-        }
-
-        private static string NativeBlockDeviceName(int index)
-        {
-            if (index == 0) return "vda";
-            if (index == 1) return "vdb";
-            if (index == 2) return "vdc";
-            if (index == 3) return "vdd";
-            return "vdx";
         }
 
         private static void VerifyExt4RootPayloads()
@@ -526,7 +502,7 @@ namespace Zapada.Boot
 
                 string path = string.Concat("/dev/", info.Name);
                 string serviceKey = string.Concat("block:", info.Name);
-                RegisterStaticDeviceNode(path, info.Name, DeviceKind.Block, serviceKey, "virtio-blk", FileAccessIntent.ReadWrite, i);
+                RegisterStaticDeviceNode(path, info.Name, DeviceKind.Block, serviceKey, info.DriverKey, FileAccessIntent.ReadWrite, i);
             }
 
             int partitionCount = PartitionRegistry.Count();
@@ -717,13 +693,6 @@ namespace Zapada.Boot
             Console.Write(fsType);
             Console.Write("\n");
 
-            BlockDevice bootDevice = BlockDeviceRegistry.FindByName("vda");
-            if (bootDevice == null)
-            {
-                Console.Write("[Boot] fstab block device missing\n");
-                return;
-            }
-
             PartitionInfo info = PartitionRegistry.FindByLabel(label);
             if (info == null)
             {
@@ -777,7 +746,12 @@ namespace Zapada.Boot
                 Console.Write("[Gate] Phase-Fat32MntD\n");
                 Console.Write("[Gate] Phase-MultiDiskStorage\n");
             }
-            else if (mountPath == "/mnt/c" || mountPath == "/mnt/d")
+            else if (mountPath == "/mnt/u" && VerifyMZFile("/mnt/u/TEST.DLL"))
+            {
+                Console.Write("[Boot] USB FAT32 read OK: MZ verified\n");
+                Console.Write("[Gate] Phase-Fat32MntU\n");
+            }
+            else if (mountPath == "/mnt/c" || mountPath == "/mnt/d" || mountPath == "/mnt/u")
             {
                 Console.Write("[Boot] FAT32 VFS read failed on mounted TEST.DLL\n");
             }

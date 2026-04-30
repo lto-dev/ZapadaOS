@@ -249,6 +249,7 @@ function Restore-ManagedCacheToBuild {
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Test.Hello.dll"); Target = (Join-Path (Get-Location).Path "build\hello.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Drivers.dll"); Target = (Join-Path (Get-Location).Path "build\drivers.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Drivers.VirtioBlock.dll"); Target = (Join-Path (Get-Location).Path "build\vblk.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "Zapada.Drivers.Usb.dll"); Target = (Join-Path (Get-Location).Path "build\usb.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Gpt.dll"); Target = (Join-Path (Get-Location).Path "build\gpt.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Fat32.dll"); Target = (Join-Path (Get-Location).Path "build\fat32.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Ext.dll"); Target = (Join-Path (Get-Location).Path "build\ext.dll"); Required = $false },
@@ -360,6 +361,17 @@ Publish-ManagedAssembly `
     -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Drivers.VirtioBlock not built; Zapada.Drivers.VirtioBlock.dll will be missing." `
     -MissingProjectMessage "  WARNING: Zapada.Drivers.VirtioBlock.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Drivers.VirtioBlock\Zapada.Drivers.VirtioBlock.csproj"); skipping." `
     -PublishFailureMessage "ERROR: dotnet publish Zapada.Drivers.VirtioBlock failed."
+
+Publish-ManagedAssembly `
+    -DisplayName "USB xHCI/storage driver (Zapada.Drivers.Usb)" `
+    -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.Drivers.Usb\Zapada.Drivers.Usb.csproj") `
+    -PublishOut (Join-Path (Get-Location).Path "build\usb-out") `
+    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\usb-out") "Zapada.Drivers.Usb.dll") `
+    -StagedDllPath (Join-Path (Get-Location).Path "build\usb.dll") `
+    -CacheDllPath (Join-Path $managedCacheRoot "Zapada.Drivers.Usb.dll") `
+    -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Drivers.Usb not built; Zapada.Drivers.Usb.dll will be missing." `
+    -MissingProjectMessage "  WARNING: Zapada.Drivers.Usb.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Drivers.Usb\Zapada.Drivers.Usb.csproj"); skipping." `
+    -PublishFailureMessage "ERROR: dotnet publish Zapada.Drivers.Usb failed."
 
 Publish-ManagedAssembly `
     -DisplayName "GPT reader (Zapada.Fs.Gpt)" `
