@@ -44,6 +44,19 @@ namespace Zapada.Runtime
         [MethodImpl(MethodImplOptions.InternalCall)]
         internal static extern int RuntimeCreateVfsLaunchState(string imagePath, string entryType, string entryMethod);
 
+        /*
+         * RuntimeLaunchTask(string imagePath, string entryType, string entryMethod) -> int
+         *
+         * Create a new ZACLR process/domain with VFS assembly source, load the
+         * specified image assembly, resolve the entry point, and execute it
+         * synchronously. Returns process ID on success, negative error on failure.
+         *
+         * The launched task gets its own domain, assembly registry, static storage,
+         * and handle table. It shares the ZACLR heap with the boot process.
+         */
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern int RuntimeLaunchTask(string imagePath, string entryType, string entryMethod);
+
     }
 }
 

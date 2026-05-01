@@ -576,6 +576,30 @@ namespace Zapada.Boot
             Console.Write(processId);
             Console.Write("\n");
             Console.Write("[Gate] Phase-ProcessDomain\n");
+
+            VerifyTaskLaunch();
+        }
+
+        private static void VerifyTaskLaunch()
+        {
+            Console.Write("[Boot] Launching task /bin/Zapada.Test.Hello.dll\n");
+
+            int processId = Zapada.Runtime.InternalCalls.RuntimeLaunchTask(
+                "Zapada.Test.Hello",
+                "Zapada.Test.Hello.Hello",
+                "Run");
+
+            if (processId < 0)
+            {
+                Console.Write("[Boot] Task launch failed rc=");
+                Console.Write(processId);
+                Console.Write("\n");
+                return;
+            }
+
+            Console.Write("[Boot] Task launch completed process=");
+            Console.Write(processId);
+            Console.Write("\n");
         }
 
         private static bool PublishRootAssemblySet()

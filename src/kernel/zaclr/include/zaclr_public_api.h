@@ -33,6 +33,9 @@ struct zaclr_result zaclr_runtime_shutdown(struct zaclr_runtime* runtime);
 struct zaclr_result zaclr_runtime_launch(struct zaclr_runtime* runtime,
                                          const struct zaclr_launch_request* request,
                                          zaclr_process_id* out_process_id);
+struct zaclr_result zaclr_runtime_launch_task(struct zaclr_runtime* runtime,
+                                              const struct zaclr_launch_request* request,
+                                              zaclr_process_id* out_process_id);
 
 #ifdef __cplusplus
 }

@@ -1072,6 +1072,8 @@ function Test-X86_64 {
         "Shell minid config format",
         "Shell gate",
         "Phase AssemblySourceVfs gate",
+        "Phase ProcessDomain gate",
+        "Phase TaskLaunch gate",
         "Boot complete gate GateD",
         "System halted after ZACLR boot validation path"
     )
@@ -1216,6 +1218,8 @@ function Test-X86_64 {
         "rc1:1:wait:/bin/Zapada.Shell.dll:Zapada.Shell.ShellHost:RunInteractive",
         "[Gate] Phase-Shell",
         "[Gate] Phase-AssemblySourceVfs",
+        "[Gate] Phase-ProcessDomain",
+        "[Gate] Phase-TaskLaunch",
         "[Gate] GateD",
         "System halted after ZACLR boot validation path."
     )

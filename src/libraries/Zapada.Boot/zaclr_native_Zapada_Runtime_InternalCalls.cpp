@@ -257,3 +257,78 @@ struct zaclr_result zaclr_native_Zapada_Runtime_InternalCalls::RuntimeCreateVfsL
     return zaclr_native_call_frame_set_i4(&frame, (int32_t)launch_state.process.id);
 }
 
+struct zaclr_result zaclr_native_Zapada_Runtime_InternalCalls::RuntimeLaunchTask___STATIC__I4__STRING__STRING__STRING(struct zaclr_native_call_frame& frame)
+{
+    const struct zaclr_string_desc* image_path_string;
+    const struct zaclr_string_desc* entry_type_string;
+    const struct zaclr_string_desc* entry_method_string;
+    const char* image_path;
+    const char* entry_type;
+    const char* entry_method;
+    struct zaclr_launch_request request;
+    zaclr_process_id process_id = 0u;
+    struct zaclr_result status;
+
+    if (frame.runtime == NULL)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, -1);
+    }
+
+    status = zaclr_native_call_frame_arg_string(&frame, 0u, &image_path_string);
+    if (status.status != ZACLR_STATUS_OK || image_path_string == NULL)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, -2);
+    }
+
+    status = zaclr_native_call_frame_arg_string(&frame, 1u, &entry_type_string);
+    if (status.status != ZACLR_STATUS_OK || entry_type_string == NULL)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, -3);
+    }
+
+    status = zaclr_native_call_frame_arg_string(&frame, 2u, &entry_method_string);
+    if (status.status != ZACLR_STATUS_OK || entry_method_string == NULL)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, -4);
+    }
+
+    image_path = zaclr_string_ascii_chars(image_path_string);
+    entry_type = zaclr_string_ascii_chars(entry_type_string);
+    entry_method = zaclr_string_ascii_chars(entry_method_string);
+    if (image_path == NULL || image_path[0] == '\0')
+    {
+        return zaclr_native_call_frame_set_i4(&frame, -5);
+    }
+
+    if (entry_type != NULL && entry_type[0] == '\0')
+    {
+        entry_type = NULL;
+    }
+
+    if (entry_method != NULL && entry_method[0] == '\0')
+    {
+        entry_method = NULL;
+    }
+
+    request = {};
+    request.image_path = image_path;
+    request.entry_type = entry_type;
+    request.entry_method = entry_method;
+    request.user = 0u;
+    request.group = 0u;
+    request.flags = 0u;
+
+    status = zaclr_runtime_launch_task(frame.runtime, &request, &process_id);
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        console_write("[ZACLR][ic] RuntimeLaunchTask failed status=");
+        console_write_dec((uint64_t)status.status);
+        console_write(" category=");
+        console_write_dec((uint64_t)status.category);
+        console_write("\n");
+        return zaclr_native_call_frame_set_i4(&frame, -10);
+    }
+
+    return zaclr_native_call_frame_set_i4(&frame, (int32_t)process_id);
+}
+

@@ -3,6 +3,7 @@
 #include <kernel/zaclr/diag/zaclr_trace_events.h>
 #include <kernel/zaclr/heap/zaclr_heap.h>
 #include <kernel/zaclr/loader/zaclr_binder.h>
+#include <kernel/zaclr/loader/zaclr_assembly_source_vfs.h>
 #include <kernel/zaclr/process/zaclr_process_launch.h>
 
 #include "../../../libraries/System.Private.CoreLib/zaclr_native_System_GC.h"
@@ -276,6 +277,8 @@ extern "C" struct zaclr_result zaclr_runtime_launch(struct zaclr_runtime* runtim
         return result;
     }
 
+    runtime->active_launch = &runtime->boot_launch;
+
     console_write("[ZACLR] Launch request image=");
     console_write(request->image_path);
     console_write(" type=");
@@ -410,5 +413,162 @@ extern "C" struct zaclr_result zaclr_runtime_launch(struct zaclr_runtime* runtim
     }
 
     console_write("[ZACLR] Launch execution completed\n");
+    return zaclr_result_ok();
+}
+
+extern "C" struct zaclr_result zaclr_runtime_launch_task(struct zaclr_runtime* runtime,
+                                                          const struct zaclr_launch_request* request,
+                                                          zaclr_process_id* out_process_id)
+{
+    struct zaclr_launch_state task_launch = {};
+    struct zaclr_launch_state* saved_active;
+    const struct zaclr_loaded_assembly* assembly;
+    const struct zaclr_method_desc* entry_method;
+    struct zaclr_result result;
+    struct zaclr_assembly_source* vfs_source;
+
+    if (out_process_id != NULL)
+    {
+        *out_process_id = 0u;
+    }
+
+    if (runtime == NULL || request == NULL)
+    {
+        return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_PROCESS);
+    }
+
+    result = zaclr_process_launch_request_validate(request);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
+    vfs_source = zaclr_assembly_source_vfs();
+    if (vfs_source == NULL)
+    {
+        console_write("[ZACLR][task] VFS assembly source not available\n");
+        return zaclr_result_make(ZACLR_STATUS_BAD_STATE, ZACLR_STATUS_CATEGORY_PROCESS);
+    }
+
+    result = zaclr_process_manager_create_launch(&runtime->process_manager,
+                                                  request,
+                                                  vfs_source,
+                                                  &task_launch);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        console_write("[ZACLR][task] Process/domain creation failed\n");
+        return result;
+    }
+
+    console_write("[ZACLR][task] Launch request image=");
+    console_write(request->image_path);
+    console_write(" type=");
+    console_write(request->entry_type != NULL ? request->entry_type : "<entrypoint>");
+    console_write(" method=");
+    console_write(request->entry_method != NULL ? request->entry_method : "<entrypoint>");
+    console_write(" process=");
+    console_write_dec((uint64_t)task_launch.process.id);
+    console_write(" domain=");
+    console_write_dec((uint64_t)task_launch.domain.id);
+    console_write("\n");
+
+    saved_active = runtime->active_launch;
+    runtime->active_launch = &task_launch;
+
+    {
+        struct zaclr_assembly_identity corelib_identity = {};
+        const struct zaclr_loaded_assembly* corelib_assembly = NULL;
+
+        corelib_identity.name = "System.Private.CoreLib";
+        corelib_identity.name_length = 22u;
+        result = zaclr_binder_bind(&runtime->loader,
+                                   &task_launch.domain,
+                                   &corelib_identity,
+                                   &corelib_assembly);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            console_write("[ZACLR][task] CoreLib preload failed\n");
+            runtime->active_launch = saved_active;
+            return result;
+        }
+    }
+
+    {
+        struct zaclr_assembly_identity launch_identity = {};
+        size_t name_length = 0u;
+
+        while (request->image_path[name_length] != '\0')
+        {
+            ++name_length;
+        }
+
+        if (name_length > 4u
+            && request->image_path[name_length - 4u] == '.'
+            && request->image_path[name_length - 3u] == 'd'
+            && request->image_path[name_length - 2u] == 'l'
+            && request->image_path[name_length - 1u] == 'l')
+        {
+            name_length -= 4u;
+        }
+
+        if (name_length == 0u)
+        {
+            runtime->active_launch = saved_active;
+            return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_LOADER);
+        }
+
+        launch_identity.name = request->image_path;
+        launch_identity.name_length = (uint32_t)name_length;
+        result = zaclr_binder_bind(&runtime->loader, &task_launch.domain, &launch_identity, &assembly);
+    }
+
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        console_write("[ZACLR][task] Launch image load failed\n");
+        runtime->active_launch = saved_active;
+        return result;
+    }
+
+    result = zaclr_process_resolve_launch_entry_point(assembly,
+                                                       request,
+                                                       &task_launch.entry_point,
+                                                       &entry_method);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        console_write("[ZACLR][task] Entry-point bind failed\n");
+        runtime->active_launch = saved_active;
+        return result;
+    }
+
+    task_launch.assembly = assembly;
+    task_launch.entry_method = entry_method;
+
+    console_write("[ZACLR][task] Entry-point bound method=");
+    console_write(entry_method->name.text);
+    console_write(" process=");
+    console_write_dec((uint64_t)task_launch.process.id);
+    console_write(" domain=");
+    console_write_dec((uint64_t)task_launch.domain.id);
+    console_write("\n");
+
+    if (out_process_id != NULL)
+    {
+        *out_process_id = task_launch.process.id;
+    }
+
+    console_write("[ZACLR][task] Starting task execution\n");
+    result = zaclr_engine_execute_launch(&runtime->engine, runtime, &task_launch);
+
+    runtime->active_launch = saved_active;
+
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        console_write("[ZACLR][task] Task execution stopped before completion\n");
+        return result;
+    }
+
+    console_write("[ZACLR][task] Task execution completed process=");
+    console_write_dec((uint64_t)task_launch.process.id);
+    console_write("\n");
     return zaclr_result_ok();
 }
