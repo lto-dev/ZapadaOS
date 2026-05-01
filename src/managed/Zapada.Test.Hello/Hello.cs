@@ -17,6 +17,7 @@ namespace Zapada.Test.Hello
     {
         public static void Run()
         {
+            Console.Write("[Gate] Phase3B\n");
             Console.Write("[Task] Zapada.Test.Hello running in separate domain\n");
             Console.Write("[Gate] Phase-TaskLaunch\n");
         }

@@ -57,6 +57,24 @@ namespace Zapada.Runtime
         [MethodImpl(MethodImplOptions.InternalCall)]
         internal static extern int RuntimeLaunchTask(string imagePath, string entryType, string entryMethod);
 
+        /*
+         * RuntimeGetProcessCount() -> int
+         *
+         * Returns the number of active entries in the process table.
+         */
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern int RuntimeGetProcessCount();
+
+        /*
+         * RuntimeGetProcessInfo(int index) -> string
+         *
+         * Returns a formatted string describing the process at the given table index.
+         * Format: "pid=N ppid=N state=name domain=N image=path uid=N gid=N exit=N"
+         * Returns null if the index is out of range or the slot is free.
+         */
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern string RuntimeGetProcessInfo(int index);
+
     }
 }
 

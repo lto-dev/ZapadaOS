@@ -109,6 +109,26 @@ internal sealed class BootProcFsProvider : ProcFsProvider
         return text;
     }
 
+    public override string BuildProcesses()
+    {
+        int count = Zapada.Runtime.InternalCalls.RuntimeGetProcessCount();
+        if (count <= 0)
+            return "no processes\n";
+
+        string text = "PID  PPID STATE   DOMAIN IMAGE\n";
+        for (int i = 0; i < 16; i++)
+        {
+            string info = Zapada.Runtime.InternalCalls.RuntimeGetProcessInfo(i);
+            if (info == null)
+                continue;
+
+            text = string.Concat(text, info);
+            text = string.Concat(text, "\n");
+        }
+
+        return text;
+    }
+
     private static string AppendField(string text, string value)
     {
         text = string.Concat(text, ValueOrDash(value));

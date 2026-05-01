@@ -37,6 +37,17 @@ enum zaclr_thread_state {
     ZACLR_THREAD_STATE_STOPPED = 5
 };
 
+enum zaclr_process_state {
+    ZACLR_PROCESS_STATE_FREE = 0,
+    ZACLR_PROCESS_STATE_CREATED = 1,
+    ZACLR_PROCESS_STATE_READY = 2,
+    ZACLR_PROCESS_STATE_RUNNING = 3,
+    ZACLR_PROCESS_STATE_BLOCKED = 4,
+    ZACLR_PROCESS_STATE_EXITED = 5,
+    ZACLR_PROCESS_STATE_FAILED = 6,
+    ZACLR_PROCESS_STATE_ZOMBIE = 7
+};
+
 enum zaclr_operand_kind {
     InlineNone = 0,
     InlineVar = 1,

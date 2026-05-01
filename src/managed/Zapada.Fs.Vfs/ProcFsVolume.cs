@@ -12,8 +12,9 @@ public sealed class ProcFsVolume : MountedVolume
     private const int NodeInterrupts = 5;
     private const int NodeMemInfo = 6;
     private const int NodeUptime = 7;
+    private const int NodeTasks = 8;
 
-    private const int MaxTokens = 8;
+    private const int MaxTokens = 9;
 
     private readonly ProcFsProvider _provider;
     private bool[] _tokenOpen = null!;
@@ -53,6 +54,7 @@ public sealed class ProcFsVolume : MountedVolume
         if (PathEquals(path, "/interrupts") || PathEquals(path, "interrupts")) return NodeInterrupts;
         if (PathEquals(path, "/meminfo") || PathEquals(path, "meminfo")) return NodeMemInfo;
         if (PathEquals(path, "/uptime") || PathEquals(path, "uptime")) return NodeUptime;
+        if (PathEquals(path, "/tasks") || PathEquals(path, "tasks")) return NodeTasks;
 
         return StorageStatus.NotFound;
     }
@@ -71,6 +73,7 @@ public sealed class ProcFsVolume : MountedVolume
         sink.OnEntry(NodeInterrupts, "interrupts", 1);
         sink.OnEntry(NodeMemInfo, "meminfo", 1);
         sink.OnEntry(NodeUptime, "uptime", 1);
+        sink.OnEntry(NodeTasks, "tasks", 1);
         return StorageStatus.Ok;
     }
 
@@ -189,13 +192,14 @@ public sealed class ProcFsVolume : MountedVolume
         if (nodeHandle == NodeInterrupts) return _provider.BuildInterrupts();
         if (nodeHandle == NodeMemInfo) return _provider.BuildMemInfo();
         if (nodeHandle == NodeUptime) return _provider.BuildUptime();
+        if (nodeHandle == NodeTasks) return _provider.BuildProcesses();
 
         return "";
     }
 
     private static bool IsFileNode(int nodeHandle)
     {
-        return nodeHandle >= NodeMounts && nodeHandle <= NodeUptime;
+        return nodeHandle >= NodeMounts && nodeHandle <= NodeTasks;
     }
 
     private static bool PathEquals(string path, string expected)

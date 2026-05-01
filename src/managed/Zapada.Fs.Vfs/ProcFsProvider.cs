@@ -9,4 +9,5 @@ public abstract class ProcFsProvider
     public abstract string BuildInterrupts();
     public abstract string BuildMemInfo();
     public abstract string BuildUptime();
+    public abstract string BuildProcesses();
 }

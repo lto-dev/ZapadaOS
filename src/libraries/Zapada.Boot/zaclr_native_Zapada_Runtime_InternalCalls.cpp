@@ -332,3 +332,139 @@ struct zaclr_result zaclr_native_Zapada_Runtime_InternalCalls::RuntimeLaunchTask
     return zaclr_native_call_frame_set_i4(&frame, (int32_t)process_id);
 }
 
+struct zaclr_result zaclr_native_Zapada_Runtime_InternalCalls::RuntimeGetProcessCount___STATIC__I4(struct zaclr_native_call_frame& frame)
+{
+    if (frame.runtime == NULL)
+    {
+        return zaclr_native_call_frame_set_i4(&frame, 0);
+    }
+
+    uint32_t count = zaclr_process_table_count(&frame.runtime->process_manager.table);
+    return zaclr_native_call_frame_set_i4(&frame, (int32_t)count);
+}
+
+struct zaclr_result zaclr_native_Zapada_Runtime_InternalCalls::RuntimeGetProcessInfo___STATIC__STRING__I4(struct zaclr_native_call_frame& frame)
+{
+    int32_t index;
+    struct zaclr_result status;
+
+    if (frame.runtime == NULL)
+    {
+        return zaclr_native_call_frame_set_string(&frame, 0u);
+    }
+
+    status = zaclr_native_call_frame_arg_i4(&frame, 0u, &index);
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        return zaclr_native_call_frame_set_string(&frame, 0u);
+    }
+
+    if (index < 0 || (uint32_t)index >= ZACLR_PROCESS_TABLE_MAX_ENTRIES)
+    {
+        return zaclr_native_call_frame_set_string(&frame, 0u);
+    }
+
+    const struct zaclr_process_entry* entry = &frame.runtime->process_manager.table.entries[(uint32_t)index];
+    if (entry->state == ZACLR_PROCESS_STATE_FREE)
+    {
+        return zaclr_native_call_frame_set_string(&frame, 0u);
+    }
+
+    char buf[256];
+    int pos = 0;
+
+    {
+        const char* prefix = "pid=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        uint32_t v = entry->pid;
+        char digits[12]; int dc = 0;
+        if (v == 0u) { digits[dc++] = '0'; }
+        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
+        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
+    }
+
+    buf[pos++] = ' ';
+    {
+        const char* prefix = "ppid=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        uint32_t v = entry->ppid;
+        char digits[12]; int dc = 0;
+        if (v == 0u) { digits[dc++] = '0'; }
+        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
+        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
+    }
+
+    buf[pos++] = ' ';
+    {
+        const char* prefix = "state=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        const char* sn = zaclr_process_state_name(entry->state);
+        while (*sn != '\0' && pos < 250) { buf[pos++] = *sn++; }
+    }
+
+    buf[pos++] = ' ';
+    {
+        const char* prefix = "domain=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        uint32_t v = entry->domain_id;
+        char digits[12]; int dc = 0;
+        if (v == 0u) { digits[dc++] = '0'; }
+        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
+        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
+    }
+
+    buf[pos++] = ' ';
+    {
+        const char* prefix = "image=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        const char* img = entry->image_name;
+        while (*img != '\0' && pos < 250) { buf[pos++] = *img++; }
+    }
+
+    buf[pos++] = ' ';
+    {
+        const char* prefix = "uid=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        uint32_t v = entry->uid;
+        char digits[12]; int dc = 0;
+        if (v == 0u) { digits[dc++] = '0'; }
+        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
+        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
+    }
+
+    buf[pos++] = ' ';
+    {
+        const char* prefix = "gid=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        uint32_t v = entry->gid;
+        char digits[12]; int dc = 0;
+        if (v == 0u) { digits[dc++] = '0'; }
+        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
+        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
+    }
+
+    buf[pos++] = ' ';
+    {
+        const char* prefix = "exit=";
+        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
+        int32_t sv = entry->exit_code;
+        if (sv < 0) { buf[pos++] = '-'; sv = -sv; }
+        uint32_t v = (uint32_t)sv;
+        char digits[12]; int dc = 0;
+        if (v == 0u) { digits[dc++] = '0'; }
+        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
+        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
+    }
+
+    buf[pos] = '\0';
+
+    zaclr_object_handle string_handle = 0u;
+    status = zaclr_string_allocate_ascii_handle(&frame.runtime->heap, buf, (uint32_t)pos, &string_handle);
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        return zaclr_native_call_frame_set_string(&frame, 0u);
+    }
+
+    return zaclr_native_call_frame_set_string(&frame, string_handle);
+}
+

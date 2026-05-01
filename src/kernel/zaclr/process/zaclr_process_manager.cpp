@@ -4,6 +4,8 @@
 
 extern "C" struct zaclr_result zaclr_process_manager_initialize(struct zaclr_process_manager* manager)
 {
+    struct zaclr_result result;
+
     if (manager == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_PROCESS);
@@ -19,6 +21,13 @@ extern "C" struct zaclr_result zaclr_process_manager_initialize(struct zaclr_pro
     manager->next_address_space_id = 1u;
     manager->next_assembly_set_id = 1u;
     manager->next_type_static_map_id = 1u;
+
+    result = zaclr_process_table_initialize(&manager->table);
+    if (result.status != ZACLR_STATUS_OK)
+    {
+        return result;
+    }
+
     return zaclr_result_ok();
 }
 
@@ -111,5 +120,27 @@ extern "C" struct zaclr_result zaclr_process_manager_create_launch(struct zaclr_
     launch_state->entry_method = NULL;
     launch_state->image_path = request->image_path;
     launch_state->flags = request->flags;
+
+    {
+        zaclr_process_id ppid = 0u;
+
+        if (launch_state->process.id > 1u)
+        {
+            ppid = 1u;
+        }
+
+        result = zaclr_process_table_register(&manager->table,
+                                               launch_state->process.id,
+                                               ppid,
+                                               launch_state->domain.id,
+                                               request->user,
+                                               request->group,
+                                               request->image_path);
+        if (result.status != ZACLR_STATUS_OK)
+        {
+            return result;
+        }
+    }
+
     return zaclr_result_ok();
 }

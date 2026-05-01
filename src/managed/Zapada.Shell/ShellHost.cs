@@ -35,6 +35,7 @@ public static class ShellHost
         RunBootSmokeCommand("ls /proc");
         RunBootSmokeCommand("cat /proc/mounts");
         RunBootSmokeCommand("cat /proc/drivers");
+        RunBootSmokeCommand("ps");
         RunBootSmokeCommand("entropy");
         RunBootSmokeCommand("cat /etc/fstab");
         RunBootSmokeCommand("cat /etc/minid.conf");
@@ -114,6 +115,8 @@ public static class ShellHost
             return CatPath(ReadArgumentOrDefault(line, argStart, argEnd, ""));
         if (TextEquals(line, commandStart, commandLength, "entropy") || TextEquals(line, commandStart, commandLength, "random"))
             return PrintEntropy(ReadArgumentOrDefault(line, argStart, argEnd, "/dev/urandom"));
+        if (TextEquals(line, commandStart, commandLength, "ps"))
+            return CatPath("/proc/tasks");
         if (TextEquals(line, commandStart, commandLength, "clear") || TextEquals(line, commandStart, commandLength, "cls"))
             return ClearScreen();
         if (TextEquals(line, commandStart, commandLength, "exit") || TextEquals(line, commandStart, commandLength, "halt"))

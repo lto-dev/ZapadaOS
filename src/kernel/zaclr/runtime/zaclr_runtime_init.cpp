@@ -404,13 +404,24 @@ extern "C" struct zaclr_result zaclr_runtime_launch(struct zaclr_runtime* runtim
     console_write_hex64((uint64_t)(uintptr_t)(runtime->boot_launch.entry_method != NULL ? runtime->boot_launch.entry_method->name.text : NULL));
     console_write("\n");
 
+    zaclr_process_table_set_state(&runtime->process_manager.table,
+                                   runtime->boot_launch.process.id,
+                                   ZACLR_PROCESS_STATE_RUNNING);
+
     console_write("[ZACLR] Starting launch execution\n");
     result = zaclr_engine_execute_launch(&runtime->engine, runtime, &runtime->boot_launch);
     if (result.status != ZACLR_STATUS_OK)
     {
+        zaclr_process_table_set_state(&runtime->process_manager.table,
+                                       runtime->boot_launch.process.id,
+                                       ZACLR_PROCESS_STATE_FAILED);
         console_write("[ZACLR] Launch execution stopped before completion\n");
         return result;
     }
+
+    zaclr_process_table_set_state(&runtime->process_manager.table,
+                                   runtime->boot_launch.process.id,
+                                   ZACLR_PROCESS_STATE_EXITED);
 
     console_write("[ZACLR] Launch execution completed\n");
     return zaclr_result_ok();
@@ -556,6 +567,10 @@ extern "C" struct zaclr_result zaclr_runtime_launch_task(struct zaclr_runtime* r
         *out_process_id = task_launch.process.id;
     }
 
+    zaclr_process_table_set_state(&runtime->process_manager.table,
+                                   task_launch.process.id,
+                                   ZACLR_PROCESS_STATE_RUNNING);
+
     console_write("[ZACLR][task] Starting task execution\n");
     result = zaclr_engine_execute_launch(&runtime->engine, runtime, &task_launch);
 
@@ -563,9 +578,22 @@ extern "C" struct zaclr_result zaclr_runtime_launch_task(struct zaclr_runtime* r
 
     if (result.status != ZACLR_STATUS_OK)
     {
+        zaclr_process_table_set_state(&runtime->process_manager.table,
+                                       task_launch.process.id,
+                                       ZACLR_PROCESS_STATE_FAILED);
+        zaclr_process_table_set_exit_code(&runtime->process_manager.table,
+                                           task_launch.process.id,
+                                           -1);
         console_write("[ZACLR][task] Task execution stopped before completion\n");
         return result;
     }
+
+    zaclr_process_table_set_state(&runtime->process_manager.table,
+                                   task_launch.process.id,
+                                   ZACLR_PROCESS_STATE_EXITED);
+    zaclr_process_table_set_exit_code(&runtime->process_manager.table,
+                                       task_launch.process.id,
+                                       0);
 
     console_write("[ZACLR][task] Task execution completed process=");
     console_write_dec((uint64_t)task_launch.process.id);

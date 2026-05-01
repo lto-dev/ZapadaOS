@@ -3,6 +3,7 @@
 
 #include <kernel/zaclr/process/zaclr_process.h>
 #include <kernel/zaclr/process/zaclr_process_launch.h>
+#include <kernel/zaclr/process/zaclr_process_table.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,7 @@ struct zaclr_process_manager {
     zaclr_address_space_id next_address_space_id;
     zaclr_assembly_set_id next_assembly_set_id;
     zaclr_type_static_map_id next_type_static_map_id;
+    struct zaclr_process_table table;
 };
 
 struct zaclr_result zaclr_process_manager_initialize(struct zaclr_process_manager* manager);

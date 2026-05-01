@@ -8,4 +8,5 @@ ZACLR_PROCESS_CPP_SOURCES := \
 	$(ZACLR_ROOT)/process/zaclr_process.cpp \
 	$(ZACLR_ROOT)/process/zaclr_process_launch.cpp \
 	$(ZACLR_ROOT)/process/zaclr_process_manager.cpp \
+	$(ZACLR_ROOT)/process/zaclr_process_table.cpp \
 	$(ZACLR_ROOT)/process/zaclr_security_context.cpp

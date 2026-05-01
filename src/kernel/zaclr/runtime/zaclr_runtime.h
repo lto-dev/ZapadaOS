@@ -26,8 +26,8 @@ struct zaclr_runtime {
     struct zaclr_handle_table finalizer_queue;
     struct zaclr_engine engine;
     struct zaclr_launch_state boot_launch;
-    struct zaclr_launch_state* active_launch;
     struct zaclr_frame* active_frame;
+    struct zaclr_launch_state* active_launch;
 };
 
 void zaclr_runtime_reset(struct zaclr_runtime* runtime);
