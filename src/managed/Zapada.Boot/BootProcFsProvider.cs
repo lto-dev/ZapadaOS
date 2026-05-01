@@ -115,7 +115,7 @@ internal sealed class BootProcFsProvider : ProcFsProvider
         if (count <= 0)
             return "no processes\n";
 
-        string text = "PID  PPID STATE   DOMAIN IMAGE\n";
+        string text = " PID PPID STATE    DOM  IMAGE\n";
         for (int i = 0; i < 16; i++)
         {
             string info = Zapada.Runtime.InternalCalls.RuntimeGetProcessInfo(i);

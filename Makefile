@@ -736,6 +736,10 @@ $(INITRAMFS_IMG): | $(BUILD_DIR)
 	elif [ -f $(SRC_DIR)/managed/Zapada.Fs.Vfs/bin/Release/net10.0/Zapada.Fs.Vfs.dll ]; then cp $(SRC_DIR)/managed/Zapada.Fs.Vfs/bin/Release/net10.0/Zapada.Fs.Vfs.dll $(BUILD_DIR)/initramfs_root/Zapada.Fs.Vfs.dll; fi
 	@if [ -f $(BUILD_DIR)/shell.dll ]; then cp $(BUILD_DIR)/shell.dll $(BUILD_DIR)/initramfs_root/Zapada.Shell.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Shell/bin/Release/net10.0/Zapada.Shell.dll ]; then cp $(SRC_DIR)/managed/Zapada.Shell/bin/Release/net10.0/Zapada.Shell.dll $(BUILD_DIR)/initramfs_root/Zapada.Shell.dll; fi
+	@if [ -f $(BUILD_DIR)/system.dll ]; then cp $(BUILD_DIR)/system.dll $(BUILD_DIR)/initramfs_root/Zapada.System.dll; \
+	elif [ -f $(SRC_DIR)/managed/Zapada.System/bin/Release/net10.0/Zapada.System.dll ]; then cp $(SRC_DIR)/managed/Zapada.System/bin/Release/net10.0/Zapada.System.dll $(BUILD_DIR)/initramfs_root/Zapada.System.dll; fi
+	@if [ -f $(BUILD_DIR)/ipcping.dll ]; then cp $(BUILD_DIR)/ipcping.dll $(BUILD_DIR)/initramfs_root/Zapada.Test.IpcPing.dll; \
+	elif [ -f $(SRC_DIR)/managed/Zapada.Test.IpcPing/bin/Release/net10.0/Zapada.Test.IpcPing.dll ]; then cp $(SRC_DIR)/managed/Zapada.Test.IpcPing/bin/Release/net10.0/Zapada.Test.IpcPing.dll $(BUILD_DIR)/initramfs_root/Zapada.Test.IpcPing.dll; fi
 	@if [ -f $(BUILD_DIR)/conf-crossasm.dll ]; then cp $(BUILD_DIR)/conf-crossasm.dll $(BUILD_DIR)/initramfs_root/Zapada.Conformance.CrossAsm.dll; \
 	elif [ -f $(SRC_DIR)/managed/Zapada.Conformance.CrossAsm/bin/Release/net10.0/Zapada.Conformance.CrossAsm.dll ]; then cp $(SRC_DIR)/managed/Zapada.Conformance.CrossAsm/bin/Release/net10.0/Zapada.Conformance.CrossAsm.dll $(BUILD_DIR)/initramfs_root/Zapada.Conformance.CrossAsm.dll; fi
 	@if [ -f $(BUILD_DIR)/conf.dll ]; then cp $(BUILD_DIR)/conf.dll $(BUILD_DIR)/initramfs_root/Zapada.Conformance.dll; \

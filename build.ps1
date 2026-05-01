@@ -257,6 +257,8 @@ function Restore-ManagedCacheToBuild {
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Storage.dll"); Target = (Join-Path (Get-Location).Path "build\storage.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Fs.Vfs.dll"); Target = (Join-Path (Get-Location).Path "build\vfs.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Shell.dll"); Target = (Join-Path (Get-Location).Path "build\shell.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "Zapada.System.dll"); Target = (Join-Path (Get-Location).Path "build\system.dll"); Required = $false },
+        @{ Cache = (Join-Path $managedCacheRoot "Zapada.Test.IpcPing.dll"); Target = (Join-Path (Get-Location).Path "build\ipcping.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "System.Console.dll"); Target = (Join-Path (Get-Location).Path "build\System.Console.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Conformance.CrossAsm.dll"); Target = (Join-Path (Get-Location).Path "build\conf-crossasm.dll"); Required = $false },
         @{ Cache = (Join-Path $managedCacheRoot "Zapada.Conformance.dll"); Target = (Join-Path (Get-Location).Path "build\conf.dll"); Required = $false }
@@ -449,6 +451,28 @@ Publish-ManagedAssembly `
     -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Shell not built; Zapada.Shell.dll will be missing." `
     -MissingProjectMessage "  WARNING: Zapada.Shell.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Shell\Zapada.Shell.csproj"); skipping." `
     -PublishFailureMessage "ERROR: dotnet publish Zapada.Shell failed."
+
+Publish-ManagedAssembly `
+    -DisplayName "system userspace API (Zapada.System)" `
+    -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.System\Zapada.System.csproj") `
+    -PublishOut (Join-Path (Get-Location).Path "build\system-out") `
+    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\system-out") "Zapada.System.dll") `
+    -StagedDllPath (Join-Path (Get-Location).Path "build\system.dll") `
+    -CacheDllPath (Join-Path $managedCacheRoot "Zapada.System.dll") `
+    -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.System not built; Zapada.System.dll will be missing." `
+    -MissingProjectMessage "  WARNING: Zapada.System.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.System\Zapada.System.csproj"); skipping." `
+    -PublishFailureMessage "ERROR: dotnet publish Zapada.System failed."
+
+Publish-ManagedAssembly `
+    -DisplayName "IPC ping test (Zapada.Test.IpcPing)" `
+    -ProjectPath (Join-Path (Get-Location).Path "src\managed\Zapada.Test.IpcPing\Zapada.Test.IpcPing.csproj") `
+    -PublishOut (Join-Path (Get-Location).Path "build\ipcping-out") `
+    -BuiltDllPath (Join-Path (Join-Path (Get-Location).Path "build\ipcping-out") "Zapada.Test.IpcPing.dll") `
+    -StagedDllPath (Join-Path (Get-Location).Path "build\ipcping.dll") `
+    -CacheDllPath (Join-Path $managedCacheRoot "Zapada.Test.IpcPing.dll") `
+    -MissingDotnetMessage "  WARNING: 'dotnet' not found. Zapada.Test.IpcPing not built; Zapada.Test.IpcPing.dll will be missing." `
+    -MissingProjectMessage "  WARNING: Zapada.Test.IpcPing.csproj not found at $(Join-Path (Get-Location).Path "src\managed\Zapada.Test.IpcPing\Zapada.Test.IpcPing.csproj"); skipping." `
+    -PublishFailureMessage "ERROR: dotnet publish Zapada.Test.IpcPing failed."
 
 Publish-ManagedAssembly `
     -DisplayName "cross-assembly conformance fixture (Zapada.Conformance.CrossAsm)" `

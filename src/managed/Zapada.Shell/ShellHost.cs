@@ -36,6 +36,8 @@ public static class ShellHost
         RunBootSmokeCommand("cat /proc/mounts");
         RunBootSmokeCommand("cat /proc/drivers");
         RunBootSmokeCommand("ps");
+        RunBootSmokeCommand("run Zapada.Test.Hello Zapada.Test.Hello.Hello Run");
+        RunBootSmokeCommand("ps");
         RunBootSmokeCommand("entropy");
         RunBootSmokeCommand("cat /etc/fstab");
         RunBootSmokeCommand("cat /etc/minid.conf");
@@ -117,6 +119,8 @@ public static class ShellHost
             return PrintEntropy(ReadArgumentOrDefault(line, argStart, argEnd, "/dev/urandom"));
         if (TextEquals(line, commandStart, commandLength, "ps"))
             return CatPath("/proc/tasks");
+        if (TextEquals(line, commandStart, commandLength, "run"))
+            return RunTask(ReadArgumentOrDefault(line, argStart, argEnd, ""));
         if (TextEquals(line, commandStart, commandLength, "clear") || TextEquals(line, commandStart, commandLength, "cls"))
             return ClearScreen();
         if (TextEquals(line, commandStart, commandLength, "exit") || TextEquals(line, commandStart, commandLength, "halt"))
@@ -187,6 +191,8 @@ public static class ShellHost
         Console.Write("  pwd               print the current directory\n");
         Console.Write("  ls [path]         list a directory\n");
         Console.Write("  cat <path>        print a text file\n");
+        Console.Write("  ps                list running processes\n");
+        Console.Write("  run <asm> [T] [M] launch a managed assembly as a new task\n");
         Console.Write("  entropy [device]  read 16 random bytes as hex\n");
         Console.Write("  clear             add terminal spacing\n");
         Console.Write("  exit, halt        leave the shell loop\n");
@@ -391,6 +397,66 @@ public static class ShellHost
         }
 
         return finalRc;
+    }
+
+    private static int RunTask(string args)
+    {
+        if (args == null || args.Length == 0)
+        {
+            Console.Write("[Shell] run needs: <assembly> <type> <method>\n");
+            Console.Write("[Shell] example: run Zapada.Test.Hello Zapada.Test.Hello.Hello Run\n");
+            return StorageStatus.InvalidArgument;
+        }
+
+        int length = args.Length;
+
+        int s0 = SkipSpaces(args, 0, length);
+        int e0 = s0;
+        while (e0 < length && args[e0] != ' ' && args[e0] != '\t') e0++;
+        if (s0 >= e0)
+        {
+            Console.Write("[Shell] run needs: <assembly> <type> <method>\n");
+            return StorageStatus.InvalidArgument;
+        }
+        string imagePath = args.Substring(s0, e0 - s0);
+
+        int s1 = SkipSpaces(args, e0, length);
+        int e1 = s1;
+        while (e1 < length && args[e1] != ' ' && args[e1] != '\t') e1++;
+        string entryType = (s1 < e1) ? args.Substring(s1, e1 - s1) : "";
+
+        int s2 = SkipSpaces(args, e1, length);
+        int e2 = s2;
+        while (e2 < length && args[e2] != ' ' && args[e2] != '\t') e2++;
+        string entryMethod = (s2 < e2) ? args.Substring(s2, e2 - s2) : "";
+
+        Console.Write("[Shell] run image=");
+        Console.Write(imagePath);
+        if (entryType.Length > 0)
+        {
+            Console.Write(" type=");
+            Console.Write(entryType);
+        }
+        if (entryMethod.Length > 0)
+        {
+            Console.Write(" method=");
+            Console.Write(entryMethod);
+        }
+        Console.Write("\n");
+
+        int processId = Zapada.Runtime.ShellInternalCalls.RuntimeLaunchTask(imagePath, entryType, entryMethod);
+        if (processId < 0)
+        {
+            Console.Write("[Shell] run failed rc=");
+            Console.Write(processId);
+            Console.Write("\n");
+            return StorageStatus.NotFound;
+        }
+
+        Console.Write("[Shell] run completed pid=");
+        Console.Write(processId);
+        Console.Write("\n");
+        return StorageStatus.Ok;
     }
 
     private static int ClearScreen()

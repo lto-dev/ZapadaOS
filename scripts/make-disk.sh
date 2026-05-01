@@ -162,6 +162,18 @@ if [ ! -f "$CROSSASM_DLL" ] && [ -f "$CROSSASM_DLL_BIN" ]; then
     CROSSASM_DLL="$CROSSASM_DLL_BIN"
 fi
 
+SYSTEM_DLL="$WORKSPACE_DIR/build/system.dll"
+SYSTEM_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.System/bin/Release/net10.0/Zapada.System.dll"
+if [ ! -f "$SYSTEM_DLL" ] && [ -f "$SYSTEM_DLL_BIN" ]; then
+    SYSTEM_DLL="$SYSTEM_DLL_BIN"
+fi
+
+IPCPING_DLL="$WORKSPACE_DIR/build/ipcping.dll"
+IPCPING_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Test.IpcPing/bin/Release/net10.0/Zapada.Test.IpcPing.dll"
+if [ ! -f "$IPCPING_DLL" ] && [ -f "$IPCPING_DLL_BIN" ]; then
+    IPCPING_DLL="$IPCPING_DLL_BIN"
+fi
+
 echo "  Formatting ZAPADA_BOOT as ext4 with Linux-style root files..."
 TMP_EXT4_IMG="$(mktemp)"
 TMP_DUMMY_FILE="$(mktemp)"
@@ -291,6 +303,8 @@ write_ext4_payload "$VBLK_DLL" "/lib/zapada/Zapada.Drivers.VirtioBlock.dll" "Zap
 write_ext4_payload "$USB_DLL" "/lib/zapada/Zapada.Drivers.Usb.dll" "Zapada.Drivers.Usb.dll"
 write_ext4_payload "$CONF_DLL" "/lib/zapada/Zapada.Conformance.dll" "Zapada.Conformance.dll"
 write_ext4_payload "$CROSSASM_DLL" "/lib/zapada/Zapada.Conformance.CrossAsm.dll" "Zapada.Conformance.CrossAsm.dll"
+write_ext4_payload "$SYSTEM_DLL" "/lib/zapada/Zapada.System.dll" "Zapada.System.dll"
+write_ext4_payload "$IPCPING_DLL" "/lib/zapada/Zapada.Test.IpcPing.dll" "Zapada.Test.IpcPing.dll"
 
 write_ext4_payload "$SHELL_DLL" "/bin/Zapada.Shell.dll" "Zapada.Shell.dll"
 write_ext4_payload "$HELLO_DLL" "/bin/Zapada.Test.Hello.dll" "Zapada.Test.Hello.dll"

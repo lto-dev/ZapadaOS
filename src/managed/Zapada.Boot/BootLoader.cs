@@ -238,6 +238,19 @@ namespace Zapada.Boot
             else
                 Console.Write("[Boot] unsupported init target selected; emergency fallback shell path pending\n");
 
+            /* IPC channel primitives test. */
+            Console.Write("[Boot] invoking: Zapada.Test.IpcPing\n");
+            int ipcPingRc = Zapada.Test.IpcPing.IpcPingTest.Run();
+            if (ipcPingRc != 0)
+            {
+                Console.Write("[Boot] IPC ping test failed rc=");
+                Console.Write(ipcPingRc);
+                Console.Write("\n");
+            }
+
+            /* Shell launch: direct in-domain call until Zapada.System IPC layer
+               is complete and Minid can run as an independent process.
+               See plans/zapada-system-userspace-architecture.md for the phased plan. */
             int shellRc;
             if (BootOptions.IsSmokeMode())
             {
@@ -249,16 +262,17 @@ namespace Zapada.Boot
                 Console.Write("[Boot] shell mode: interactive\n");
                 shellRc = ShellHost.RunInteractive(-1);
             }
+
             if (shellRc != StorageStatus.Ok)
             {
-                Console.Write("[Boot] Shell startup failed rc=");
+                Console.Write("[Boot] shell failed rc=");
                 Console.Write(shellRc);
                 Console.Write("\n");
                 Zapada.Drivers.DriverRegistry.SetState("shell", Zapada.Drivers.DriverState.Failed);
             }
             else
             {
-                Console.Write("[Boot] Shell startup completed\n");
+                Console.Write("[Boot] shell completed\n");
                 Zapada.Drivers.DriverRegistry.SetState("shell", Zapada.Drivers.DriverState.Started);
             }
 
@@ -612,6 +626,8 @@ namespace Zapada.Boot
                 "/lib/zapada/Zapada.Storage.dll",
                 "/lib/zapada/Zapada.Fs.Vfs.dll",
                 "/lib/zapada/Zapada.Drivers.dll",
+                "/lib/zapada/Zapada.System.dll",
+                "/lib/zapada/Zapada.Test.IpcPing.dll",
                 "/lib/dotnet/System.Console.dll",
                 "/lib/dotnet/System.dll",
                 "/lib/dotnet/System.Runtime.dll",

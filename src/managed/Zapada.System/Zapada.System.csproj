@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      Zapada.System - managed userspace API assembly.
+      Provides IPC channels, filesystem client, process management,
+      and console access for all managed OS processes.
+
+      No process references Zapada.Boot directly. All service access
+      goes through Zapada.System APIs backed by kernel IPC/InternalCalls.
+    -->
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Zapada.System</AssemblyName>
+    <RootNamespace>Zapada.System</RootNamespace>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

@@ -254,6 +254,11 @@ struct zaclr_result zaclr_native_Zapada_Runtime_InternalCalls::RuntimeCreateVfsL
     console_write(image_path);
     console_write("\n");
 
+    /* Mark as ZOMBIE: this was a validation-only probe, not a real process. */
+    zaclr_process_table_set_state(&frame.runtime->process_manager.table,
+                                   launch_state.process.id,
+                                   ZACLR_PROCESS_STATE_ZOMBIE);
+
     return zaclr_native_call_frame_set_i4(&frame, (int32_t)launch_state.process.id);
 }
 
@@ -365,96 +370,56 @@ struct zaclr_result zaclr_native_Zapada_Runtime_InternalCalls::RuntimeGetProcess
     }
 
     const struct zaclr_process_entry* entry = &frame.runtime->process_manager.table.entries[(uint32_t)index];
-    if (entry->state == ZACLR_PROCESS_STATE_FREE)
+    if (entry->state == ZACLR_PROCESS_STATE_FREE || entry->state == ZACLR_PROCESS_STATE_ZOMBIE)
     {
         return zaclr_native_call_frame_set_string(&frame, 0u);
     }
 
+    /* Format: "PID  PPID STATE    DOMAIN IMAGE" matching the header in BuildProcesses(). */
     char buf[256];
     int pos = 0;
 
-    {
-        const char* prefix = "pid=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
-        uint32_t v = entry->pid;
-        char digits[12]; int dc = 0;
-        if (v == 0u) { digits[dc++] = '0'; }
-        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
-        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
-    }
+    /* Helper macro: write a uint32 right-justified in a fixed field. */
+    #define WRITE_UINT_FIELD(val, width) do { \
+        uint32_t _v = (val); \
+        char _d[12]; int _dc = 0; \
+        if (_v == 0u) { _d[_dc++] = '0'; } \
+        else { while (_v > 0u) { _d[_dc++] = (char)('0' + (_v % 10u)); _v /= 10u; } } \
+        int _pad = (width) - _dc; \
+        while (_pad-- > 0 && pos < 250) { buf[pos++] = ' '; } \
+        for (int _i = _dc - 1; _i >= 0 && pos < 250; --_i) { buf[pos++] = _d[_i]; } \
+    } while (0)
 
-    buf[pos++] = ' ';
-    {
-        const char* prefix = "ppid=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
-        uint32_t v = entry->ppid;
-        char digits[12]; int dc = 0;
-        if (v == 0u) { digits[dc++] = '0'; }
-        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
-        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
-    }
+    #define WRITE_STR_FIELD(str, width) do { \
+        const char* _s = (str); \
+        int _len = 0; \
+        while (_s[_len] != '\0') { _len++; } \
+        int _i2 = 0; \
+        while (_i2 < _len && pos < 250) { buf[pos++] = _s[_i2++]; } \
+        int _pad = (width) - _len; \
+        while (_pad-- > 0 && pos < 250) { buf[pos++] = ' '; } \
+    } while (0)
 
+    /* PID (4 chars) */
+    WRITE_UINT_FIELD(entry->pid, 4u);
     buf[pos++] = ' ';
-    {
-        const char* prefix = "state=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
-        const char* sn = zaclr_process_state_name(entry->state);
-        while (*sn != '\0' && pos < 250) { buf[pos++] = *sn++; }
-    }
-
+    /* PPID (4 chars) */
+    WRITE_UINT_FIELD(entry->ppid, 4u);
     buf[pos++] = ' ';
-    {
-        const char* prefix = "domain=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
-        uint32_t v = entry->domain_id;
-        char digits[12]; int dc = 0;
-        if (v == 0u) { digits[dc++] = '0'; }
-        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
-        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
-    }
-
+    /* STATE (8 chars left-aligned) */
+    WRITE_STR_FIELD(zaclr_process_state_name(entry->state), 8u);
     buf[pos++] = ' ';
+    /* DOMAIN (4 chars) */
+    WRITE_UINT_FIELD(entry->domain_id, 4u);
+    buf[pos++] = ' ';
+    /* IMAGE (variable) */
     {
-        const char* prefix = "image=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
         const char* img = entry->image_name;
         while (*img != '\0' && pos < 250) { buf[pos++] = *img++; }
     }
 
-    buf[pos++] = ' ';
-    {
-        const char* prefix = "uid=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
-        uint32_t v = entry->uid;
-        char digits[12]; int dc = 0;
-        if (v == 0u) { digits[dc++] = '0'; }
-        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
-        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
-    }
-
-    buf[pos++] = ' ';
-    {
-        const char* prefix = "gid=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
-        uint32_t v = entry->gid;
-        char digits[12]; int dc = 0;
-        if (v == 0u) { digits[dc++] = '0'; }
-        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
-        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
-    }
-
-    buf[pos++] = ' ';
-    {
-        const char* prefix = "exit=";
-        while (*prefix != '\0' && pos < 250) { buf[pos++] = *prefix++; }
-        int32_t sv = entry->exit_code;
-        if (sv < 0) { buf[pos++] = '-'; sv = -sv; }
-        uint32_t v = (uint32_t)sv;
-        char digits[12]; int dc = 0;
-        if (v == 0u) { digits[dc++] = '0'; }
-        else { while (v > 0u) { digits[dc++] = (char)('0' + (v % 10u)); v /= 10u; } }
-        for (int i = dc - 1; i >= 0 && pos < 250; --i) { buf[pos++] = digits[i]; }
-    }
+    #undef WRITE_UINT_FIELD
+    #undef WRITE_STR_FIELD
 
     buf[pos] = '\0';
 
