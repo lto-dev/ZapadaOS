@@ -146,6 +146,10 @@ if [ ! -f "$CONSOLE_DLL" ] && [ -f "$CONSOLE_DLL_BIN" ]; then
     CONSOLE_DLL="$CONSOLE_DLL_BIN"
 fi
 
+SYSTEM_DLL="$WORKSPACE_DIR/dotnet/System.dll"
+SYSTEM_PRIVATE_CORELIB_DLL="$WORKSPACE_DIR/dotnet/System.Private.CoreLib.dll"
+SYSTEM_RUNTIME_DLL="$WORKSPACE_DIR/dotnet/System.Runtime.dll"
+
 CONF_DLL="$WORKSPACE_DIR/build/conf.dll"
 CONF_DLL_BIN="$WORKSPACE_DIR/src/managed/Zapada.Conformance/bin/Release/net10.0/Zapada.Conformance.dll"
 if [ ! -f "$CONF_DLL" ] && [ -f "$CONF_DLL_BIN" ]; then
@@ -163,8 +167,12 @@ TMP_EXT4_IMG="$(mktemp)"
 TMP_DUMMY_FILE="$(mktemp)"
 TMP_FSTAB_FILE="$(mktemp)"
 TMP_MOTD_FILE="$(mktemp)"
+TMP_MINID_FILE="$(mktemp)"
+TMP_RC1_FILE="$(mktemp)"
+TMP_RC3_FILE="$(mktemp)"
+TMP_RCLOCAL_FILE="$(mktemp)"
 cleanup() {
-    rm -f "$TMP_EXT4_IMG" "$TMP_DUMMY_FILE" "$TMP_FSTAB_FILE" "$TMP_MOTD_FILE"
+    rm -f "$TMP_EXT4_IMG" "$TMP_DUMMY_FILE" "$TMP_FSTAB_FILE" "$TMP_MOTD_FILE" "$TMP_MINID_FILE" "$TMP_RC1_FILE" "$TMP_RC3_FILE" "$TMP_RCLOCAL_FILE"
 }
 trap cleanup EXIT
 dd if=/dev/zero of="$TMP_EXT4_IMG" bs=512 count="$ROOT_PART_SECTORS" status=none
@@ -183,14 +191,54 @@ Welcome to Zapada.
 Ext4 is mounted as /, and FAT32 compatibility is mounted at /mnt/c.
 Type help for shell commands.
 MOTD
+cat > "$TMP_MINID_FILE" <<'MINID'
+# Zapada minid provisional old-style init table
+# Format: id:runlevels:action:assembly:type:method
+# Actions intentionally stay small: once, wait, respawn, off.
+sysinit:S:once:/sbin/Zapada.Minid.dll:Zapada.Minid.Program:SysInit
+rc1:1:wait:/bin/Zapada.Shell.dll:Zapada.Shell.ShellHost:RunInteractive
+rc3:3:respawn:/sbin/Zapada.Login.dll:Zapada.Login.Program:Main
+MINID
+cat > "$TMP_RC1_FILE" <<'RC1'
+# Zapada rc1 placeholder
+# Single-user maintenance target will start one shell on /dev/console after managed process launch exists.
+RC1
+cat > "$TMP_RC3_FILE" <<'RC3'
+# Zapada rc3 placeholder
+# Multi-user login target will start Zapada.Login after process accounting and sessions exist.
+RC3
+cat > "$TMP_RCLOCAL_FILE" <<'RCLOCAL'
+# Zapada rc.local placeholder
+# Local startup hooks are deferred until minid owns old-style service actions.
+RCLOCAL
 debugfs -w -R "mkdir /etc" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /etc/rc.d" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /boot" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /boot/zapada" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /lib" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /lib/dotnet" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /lib/zapada" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /bin" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /sbin" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /usr" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /usr/bin" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /usr/sbin" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /usr/lib" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt/c" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt/d" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "mkdir /mnt/u" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /var" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /var/log" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /var/run" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
+debugfs -w -R "mkdir /tmp" "$TMP_EXT4_IMG" > /dev/null 2>&1 || true
 debugfs -w -R "write $TMP_DUMMY_FILE /dummy.txt" "$TMP_EXT4_IMG" > /dev/null 2>&1
 debugfs -w -R "write $TMP_FSTAB_FILE /etc/fstab" "$TMP_EXT4_IMG" > /dev/null 2>&1
 debugfs -w -R "write $TMP_MOTD_FILE /etc/motd" "$TMP_EXT4_IMG" > /dev/null 2>&1
+debugfs -w -R "write $TMP_MINID_FILE /etc/minid.conf" "$TMP_EXT4_IMG" > /dev/null 2>&1
+debugfs -w -R "write $TMP_RC1_FILE /etc/rc.d/rc1" "$TMP_EXT4_IMG" > /dev/null 2>&1
+debugfs -w -R "write $TMP_RC3_FILE /etc/rc.d/rc3" "$TMP_EXT4_IMG" > /dev/null 2>&1
+debugfs -w -R "write $TMP_RCLOCAL_FILE /etc/rc.d/rc.local" "$TMP_EXT4_IMG" > /dev/null 2>&1
 
 write_ext4_payload() {
     local source_path="$1"
@@ -205,6 +253,9 @@ write_ext4_payload() {
 }
 
 echo "  Adding managed payloads to ZAPADA_BOOT Ext4 root partition..."
+
+# Compatibility copies remain at / until the VFS-backed assembly source and
+# post-boot process launch path switch to the ordered search paths below.
 write_ext4_payload "$BOOT_DLL" "/Zapada.Boot.dll" "Zapada.Boot.dll"
 write_ext4_payload "$HELLO_DLL" "/Zapada.Test.Hello.dll" "Zapada.Test.Hello.dll"
 write_ext4_payload "$DRIVERS_DLL" "/Zapada.Drivers.dll" "Zapada.Drivers.dll"
@@ -220,6 +271,29 @@ write_ext4_payload "$SHELL_DLL" "/Zapada.Shell.dll" "Zapada.Shell.dll"
 write_ext4_payload "$CONSOLE_DLL" "/System.Console.dll" "System.Console.dll"
 write_ext4_payload "$CONF_DLL" "/Zapada.Conformance.dll" "Zapada.Conformance.dll"
 write_ext4_payload "$CROSSASM_DLL" "/Zapada.Conformance.CrossAsm.dll" "Zapada.Conformance.CrossAsm.dll"
+
+echo "  Adding ordered managed payload layout to ZAPADA_BOOT Ext4 root partition..."
+write_ext4_payload "$BOOT_DLL" "/boot/zapada/Zapada.Boot.dll" "Zapada.Boot.dll"
+
+write_ext4_payload "$SYSTEM_PRIVATE_CORELIB_DLL" "/lib/dotnet/System.Private.CoreLib.dll" "System.Private.CoreLib.dll"
+write_ext4_payload "$SYSTEM_RUNTIME_DLL" "/lib/dotnet/System.Runtime.dll" "System.Runtime.dll"
+write_ext4_payload "$SYSTEM_DLL" "/lib/dotnet/System.dll" "System.dll"
+write_ext4_payload "$CONSOLE_DLL" "/lib/dotnet/System.Console.dll" "System.Console.dll"
+
+write_ext4_payload "$STORAGE_DLL" "/lib/zapada/Zapada.Storage.dll" "Zapada.Storage.dll"
+write_ext4_payload "$VFS_DLL" "/lib/zapada/Zapada.Fs.Vfs.dll" "Zapada.Fs.Vfs.dll"
+write_ext4_payload "$EXT_DLL" "/lib/zapada/Zapada.Fs.Ext.dll" "Zapada.Fs.Ext.dll"
+write_ext4_payload "$EXT4_DLL" "/lib/zapada/Zapada.Fs.Ext4.dll" "Zapada.Fs.Ext4.dll"
+write_ext4_payload "$FAT32_DLL" "/lib/zapada/Zapada.Fs.Fat32.dll" "Zapada.Fs.Fat32.dll"
+write_ext4_payload "$GPT_DLL" "/lib/zapada/Zapada.Fs.Gpt.dll" "Zapada.Fs.Gpt.dll"
+write_ext4_payload "$DRIVERS_DLL" "/lib/zapada/Zapada.Drivers.dll" "Zapada.Drivers.dll"
+write_ext4_payload "$VBLK_DLL" "/lib/zapada/Zapada.Drivers.VirtioBlock.dll" "Zapada.Drivers.VirtioBlock.dll"
+write_ext4_payload "$USB_DLL" "/lib/zapada/Zapada.Drivers.Usb.dll" "Zapada.Drivers.Usb.dll"
+write_ext4_payload "$CONF_DLL" "/lib/zapada/Zapada.Conformance.dll" "Zapada.Conformance.dll"
+write_ext4_payload "$CROSSASM_DLL" "/lib/zapada/Zapada.Conformance.CrossAsm.dll" "Zapada.Conformance.CrossAsm.dll"
+
+write_ext4_payload "$SHELL_DLL" "/bin/Zapada.Shell.dll" "Zapada.Shell.dll"
+write_ext4_payload "$HELLO_DLL" "/bin/Zapada.Test.Hello.dll" "Zapada.Test.Hello.dll"
 dd if="$TMP_EXT4_IMG" of="$DISK_IMG" bs=512 seek="$ROOT_PART_LBA" conv=notrunc status=none
 
 # Add TEST.DLL to ZAPADA_DATA for compatibility checks.

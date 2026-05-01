@@ -29,6 +29,14 @@
 #define EARLY_HEAP_SIZE  (8u * 1024u * 1024u)
 
 /*
+ * ZACLR_ROOT_PROVIDER_HEAP_BYTES - additional heap reservation for provider-
+ * owned post-root assembly images. Initramfs lookup is zero-copy, but after
+ * the real root is mounted the VFS assembly source must own cached images so
+ * normal post-boot launches no longer depend on initramfs storage.
+ */
+#define ZACLR_ROOT_PROVIDER_HEAP_BYTES  (32u * 1024u * 1024u)
+
+/*
  * kernel_end - linker-defined symbol marking the byte immediately past the
  * end of the kernel BSS section. Take its address to get the end address.
  *

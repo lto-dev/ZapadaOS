@@ -35,6 +35,15 @@ namespace Zapada.Runtime
         [MethodImpl(MethodImplOptions.InternalCall)]
         internal static extern int RuntimeLoad(byte[] dll);
 
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern int RuntimeTransitionToVfs(string rootPath);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern int RuntimeBindFromSource(string assemblyName);
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern int RuntimeCreateVfsLaunchState(string imagePath, string entryType, string entryMethod);
+
     }
 }
 

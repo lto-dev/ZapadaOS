@@ -45,9 +45,20 @@ extern "C" struct zaclr_result zaclr_process_manager_create_boot_launch(struct z
                                                                           const struct zaclr_launch_request* request,
                                                                           struct zaclr_launch_state* launch_state)
 {
+    return zaclr_process_manager_create_launch(manager,
+                                               request,
+                                               (struct zaclr_assembly_source*)zaclr_assembly_source_initramfs(),
+                                               launch_state);
+}
+
+extern "C" struct zaclr_result zaclr_process_manager_create_launch(struct zaclr_process_manager* manager,
+                                                                     const struct zaclr_launch_request* request,
+                                                                     struct zaclr_assembly_source* source,
+                                                                     struct zaclr_launch_state* launch_state)
+{
     struct zaclr_result result;
 
-    if (manager == NULL || request == NULL || launch_state == NULL)
+    if (manager == NULL || request == NULL || source == NULL || launch_state == NULL)
     {
         return zaclr_result_make(ZACLR_STATUS_INVALID_ARGUMENT, ZACLR_STATUS_CATEGORY_PROCESS);
     }
@@ -83,7 +94,7 @@ extern "C" struct zaclr_result zaclr_process_manager_create_boot_launch(struct z
         return result;
     }
 
-    launch_state->domain.source = (struct zaclr_assembly_source*)zaclr_assembly_source_initramfs();
+    launch_state->domain.source = source;
     launch_state->domain.flags = 0u;
 
     launch_state->thread.id = manager->next_thread_id++;

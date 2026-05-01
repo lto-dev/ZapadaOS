@@ -23,6 +23,9 @@ namespace Zapada
     {
         [MethodImpl(MethodImplOptions.InternalCall)]
         internal static extern string GetBootCommandLine();
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        internal static extern int GetTickCount();
     }
 }
 

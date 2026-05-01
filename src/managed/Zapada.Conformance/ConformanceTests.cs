@@ -65,23 +65,23 @@ internal static partial class ConformanceTests
     }
     private static void Test(string name)
     {
-        InternalCalls.Write("[Conf] TEST ");
-        InternalCalls.Write(name);
-        InternalCalls.Write("\n");
+        //InternalCalls.Write("[Conf] TEST ");
+        //InternalCalls.Write(name);
+        //InternalCalls.Write("\n");
     }
     private static void Pass(string name)
     {
-        InternalCalls.Write("[Conf] PASS ");
-        InternalCalls.Write(name);
-        InternalCalls.Write("\n");
+        //InternalCalls.Write("[Conf] PASS ");
+        //InternalCalls.Write(name);
+        //InternalCalls.Write("\n");
         s_pass = s_pass + 1;
     }
 
     private static void Fail(string name)
     {
-        InternalCalls.Write("[Conf] FAIL ");
-        InternalCalls.Write(name);
-        InternalCalls.Write("\n");
+        //InternalCalls.Write("[Conf] FAIL ");
+        //InternalCalls.Write(name);
+        //InternalCalls.Write("\n");
         s_fail = s_fail + 1;
     }
 

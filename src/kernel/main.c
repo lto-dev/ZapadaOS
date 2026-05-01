@@ -235,11 +235,13 @@ static uint64_t boot_get_heap_reservation_bytes(void)
         (const uint8_t *)(uintptr_t)g_initramfs_start,
         g_initramfs_size);
 
-    if ((uint64_t)initramfs_extra > (uint64_t)EARLY_HEAP_SIZE) {
-        return (uint64_t)initramfs_extra;
+    uint64_t required = (uint64_t)EARLY_HEAP_SIZE + (uint64_t)ZACLR_ROOT_PROVIDER_HEAP_BYTES;
+
+    if ((uint64_t)initramfs_extra > required) {
+        required = (uint64_t)initramfs_extra;
     }
 
-    return (uint64_t)EARLY_HEAP_SIZE;
+    return required;
 }
 
 static void boot_discover_initramfs(mb2_info_t *mb_info)

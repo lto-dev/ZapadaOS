@@ -33,6 +33,7 @@ ZACLR_CORE_CPP_SOURCES := \
 	$(ZACLR_ROOT)/interop/zaclr_qcall_table.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_assembly_registry.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_assembly_source_initramfs.cpp \
+	$(ZACLR_ROOT)/loader/zaclr_assembly_source_vfs.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_binder.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_loader.cpp \
 	$(ZACLR_ROOT)/loader/zaclr_pe_image.cpp \

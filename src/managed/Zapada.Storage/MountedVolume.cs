@@ -12,6 +12,7 @@ public abstract class MountedVolume
     public abstract int Stat(int nodeHandle, NodeFacts facts);
     public abstract int Open(int nodeHandle, int accessIntent);
     public abstract int Read(int fileToken, byte[] buffer, int offset, int count);
+    public virtual int Write(int fileToken, byte[] buffer, int offset, int count) { return StorageStatus.NotSupported; }
     public abstract int Seek(int fileToken, long absoluteOffset);
     public abstract int Close(int fileToken);
 

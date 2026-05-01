@@ -22,7 +22,7 @@ internal static class VirtioConstants
     public const int QueueUsedBytes = 6 + QueueSize * 8;
     public const int RequestHeaderBytes = 16;
     public const int RequestStatusBytes = 1;
-    public const int MaxSectorsPerRequest = 8;
+    public const int MaxSectorsPerRequest = 128;
 
     public const int CommonDeviceFeatureSelect = 0x000;
     public const int CommonDeviceFeature = 0x004;

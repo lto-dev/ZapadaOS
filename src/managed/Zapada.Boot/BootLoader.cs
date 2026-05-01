@@ -213,12 +213,30 @@ namespace Zapada.Boot
 
             MountPersistentRootAndCompatibilityVolume();
             MountDeviceNamespace();
+            VerifyConsoleDeviceWrite();
             MountProcNamespace();
 
             string bootCommandLine = BootOptions.CommandLine();
             Console.Write("[Boot] command line: ");
             Console.Write(bootCommandLine);
             Console.Write("\n");
+            Console.Write("[Boot] init target: ");
+            Console.Write(BootOptions.InitTarget());
+            Console.Write("\n");
+            Console.Write("[Boot] runlevel: ");
+            Console.Write(BootOptions.Runlevel());
+            Console.Write("\n");
+
+            if (BootOptions.IsEmergencyMode())
+                Console.Write("[Boot] emergency mode requested; shell fallback remains boot-owned until minid launch exists\n");
+            else if (BootOptions.IsSingleUserMode())
+                Console.Write("[Boot] single-user mode requested; rc1 remains pending until minid launch exists\n");
+            else if (BootOptions.RequestsShellInit())
+                Console.Write("[Boot] explicit shell init target requested\n");
+            else if (BootOptions.RequestsMinidInit())
+                Console.Write("[Boot] minid init target selected; launch substrate pending\n");
+            else
+                Console.Write("[Boot] unsupported init target selected; emergency fallback shell path pending\n");
 
             int shellRc;
             if (BootOptions.IsSmokeMode())
@@ -246,6 +264,21 @@ namespace Zapada.Boot
 
             /* Gate D: boot sequence complete. */
             Console.Write("[Gate] GateD\n");
+        }
+
+        private static bool TransitionAssemblySourceToRoot()
+        {
+            int rc = Zapada.Runtime.InternalCalls.RuntimeTransitionToVfs("/");
+            if (rc == 0)
+            {
+                Console.Write("[Gate] Phase-AssemblySourceVfs\n");
+                return true;
+            }
+
+            Console.Write("[Boot] assembly source VFS transition failed rc=");
+            Console.Write(rc);
+            Console.Write("\n");
+            return false;
         }
 
         private static void RegisterKnownDriverDescriptors()
@@ -411,6 +444,7 @@ namespace Zapada.Boot
 
             VerifyExt4RootPayloads();
             MountConfiguredFstabVolumes();
+            VerifyRootAssemblySourceProvider();
         }
 
         private static BlockDevice EnsureBlockDevices(long minimumSectorCount)
@@ -434,6 +468,210 @@ namespace Zapada.Boot
                 Console.Write("[Gate] Phase-Ext4Fstab\n");
             else
                 Console.Write("[Boot] Ext4 /etc/fstab read failed\n");
+
+            VerifyOrderedRootLayout();
+            VerifyDiskAssemblyLoad();
+        }
+
+        private static void VerifyOrderedRootLayout()
+        {
+            if (!VerifyMZFile("/boot/zapada/Zapada.Boot.dll"))
+            {
+                Console.Write("[Boot] ordered root missing /boot/zapada/Zapada.Boot.dll\n");
+                return;
+            }
+
+            if (!VerifyMZFile("/lib/dotnet/System.Private.CoreLib.dll"))
+            {
+                Console.Write("[Boot] ordered root missing /lib/dotnet/System.Private.CoreLib.dll\n");
+                return;
+            }
+
+            if (!VerifyMZFile("/lib/zapada/Zapada.Storage.dll"))
+            {
+                Console.Write("[Boot] ordered root missing /lib/zapada/Zapada.Storage.dll\n");
+                return;
+            }
+
+            if (!VerifyMZFile("/bin/Zapada.Shell.dll"))
+            {
+                Console.Write("[Boot] ordered root missing /bin/Zapada.Shell.dll\n");
+                return;
+            }
+
+            Console.Write("[Gate] Phase-RootLayout\n");
+        }
+
+        private static void VerifyDiskAssemblyLoad()
+        {
+            byte[] image = ReadWholeFileBounded("/bin/Zapada.Test.Hello.dll", 8192);
+            if (image == null)
+            {
+                Console.Write("[Boot] disk assembly read failed path=/bin/Zapada.Test.Hello.dll\n");
+                return;
+            }
+
+            if (image.Length < 2 || image[0] != 0x4D || image[1] != 0x5A)
+            {
+                Console.Write("[Boot] disk assembly MZ validation failed path=/bin/Zapada.Test.Hello.dll\n");
+                return;
+            }
+
+            int assemblyId = Zapada.Runtime.InternalCalls.RuntimeLoad(image);
+            if (assemblyId < 0)
+            {
+                Console.Write("[Boot] disk assembly RuntimeLoad failed rc=");
+                Console.Write(assemblyId);
+                Console.Write(" path=/bin/Zapada.Test.Hello.dll\n");
+                return;
+            }
+
+            Console.Write("[Boot] disk assembly loaded from /bin/Zapada.Test.Hello.dll id=");
+            Console.Write(assemblyId);
+            Console.Write("\n");
+            Console.Write("[Gate] Phase-DiskAssemblyLoad\n");
+        }
+
+        private static void VerifyRootAssemblySourceProvider()
+        {
+            if (!PublishRootAssemblySet())
+                return;
+
+            if (!TransitionAssemblySourceToRoot())
+                return;
+
+            int assemblyId = Zapada.Runtime.InternalCalls.RuntimeBindFromSource("Zapada.Test.Hello");
+            if (assemblyId < 0)
+            {
+                Console.Write("[Boot] assembly source bind failed rc=");
+                Console.Write(assemblyId);
+                Console.Write(" assembly=Zapada.Test.Hello\n");
+                return;
+            }
+
+            Console.Write("[Boot] assembly source loaded from root assembly=Zapada.Test.Hello id=");
+            Console.Write(assemblyId);
+            Console.Write("\n");
+            Console.Write("[Gate] Phase-AssemblySourceVfsLocate\n");
+
+            VerifyVfsOnlyLaunchState();
+        }
+
+        private static void VerifyVfsOnlyLaunchState()
+        {
+            int processId = Zapada.Runtime.InternalCalls.RuntimeCreateVfsLaunchState(
+                "/bin/Zapada.Test.Hello.dll",
+                "Zapada.Test.Hello.Hello",
+                "Run");
+
+            if (processId < 0)
+            {
+                Console.Write("[Boot] VFS-only launch state failed rc=");
+                Console.Write(processId);
+                Console.Write("\n");
+                return;
+            }
+
+            Console.Write("[Boot] VFS-only launch state process=");
+            Console.Write(processId);
+            Console.Write("\n");
+            Console.Write("[Gate] Phase-ProcessDomain\n");
+        }
+
+        private static bool PublishRootAssemblySet()
+        {
+            string[] assemblyPaths = new string[]
+            {
+                "/boot/zapada/Zapada.Boot.dll",
+                "/bin/Zapada.Test.Hello.dll",
+                "/bin/Zapada.Shell.dll",
+                "/lib/zapada/Zapada.Storage.dll",
+                "/lib/zapada/Zapada.Fs.Vfs.dll",
+                "/lib/zapada/Zapada.Drivers.dll",
+                "/lib/dotnet/System.Console.dll",
+                "/lib/dotnet/System.dll",
+                "/lib/dotnet/System.Runtime.dll",
+                "/lib/dotnet/System.Private.CoreLib.dll"
+            };
+
+            for (int i = 0; i < assemblyPaths.Length; i++)
+            {
+                Console.Write("[Boot] assembly source publish begin path=");
+                Console.Write(assemblyPaths[i]);
+                Console.Write("\n");
+
+                int rc = AssemblySourceBridge.ReadAndPublish(assemblyPaths[i]);
+                if (rc != StorageStatus.Ok)
+                {
+                    Console.Write("[Boot] assembly source publish failed rc=");
+                    Console.Write(rc);
+                    Console.Write(" path=");
+                    Console.Write(assemblyPaths[i]);
+                    Console.Write("\n");
+                    return false;
+                }
+
+                Console.Write("[Boot] assembly source publish done path=");
+                Console.Write(assemblyPaths[i]);
+                Console.Write("\n");
+            }
+
+            return true;
+        }
+
+        private static byte[] ReadWholeFileBounded(string path, int maxBytes)
+        {
+            if (path == null || path.Length == 0 || maxBytes <= 0)
+                return null;
+
+            int fd = Vfs.Open(path);
+            if (fd < 0)
+                return null;
+
+            byte[] scratch = new byte[maxBytes];
+            byte[] chunk = new byte[256];
+            int total = 0;
+            bool overflow = false;
+
+            while (true)
+            {
+                int remaining = maxBytes - total;
+                if (remaining <= 0)
+                {
+                    overflow = true;
+                    break;
+                }
+
+                int request = chunk.Length;
+                if (request > remaining)
+                    request = remaining;
+
+                int bytesRead = Vfs.Read(fd, chunk, 0, request);
+                if (bytesRead < 0)
+                {
+                    Vfs.Close(fd);
+                    return null;
+                }
+
+                if (bytesRead == 0)
+                    break;
+
+                for (int i = 0; i < bytesRead; i++)
+                    scratch[total + i] = chunk[i];
+
+                total += bytesRead;
+            }
+
+            Vfs.Close(fd);
+
+            if (overflow || total <= 0)
+                return null;
+
+            byte[] exact = new byte[total];
+            for (int i = 0; i < total; i++)
+                exact[i] = scratch[i];
+
+            return exact;
         }
 
         private static bool VerifyMZFile(string path)
@@ -476,6 +714,36 @@ namespace Zapada.Boot
 
             Console.Write("[Boot] /dev mounted from DeviceRegistry\n");
             Console.Write("[Gate] Phase-DevFs\n");
+        }
+
+        private static void VerifyConsoleDeviceWrite()
+        {
+            int fd = Vfs.Open("/dev/console", FileAccessIntent.ReadWrite);
+            if (fd < 0)
+            {
+                Console.Write("[Boot] /dev/console open failed rc=");
+                Console.Write(fd);
+                Console.Write("\n");
+                return;
+            }
+
+            string message = "[DevFs] /dev/console write through VFS\n";
+            byte[] bytes = new byte[message.Length];
+            for (int i = 0; i < message.Length; i++)
+                bytes[i] = (byte)(message[i] & 0xFF);
+
+            int written = Vfs.Write(fd, bytes, 0, bytes.Length);
+            Vfs.Close(fd);
+
+            if (written == bytes.Length)
+            {
+                Console.Write("[Gate] Phase-DevConsole\n");
+                return;
+            }
+
+            Console.Write("[Boot] /dev/console write failed rc=");
+            Console.Write(written);
+            Console.Write("\n");
         }
 
         private static void RegisterDeviceNodes()

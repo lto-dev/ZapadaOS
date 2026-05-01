@@ -199,8 +199,12 @@ void kernel_main_aarch64(uint64_t fdt_base)
     heap_reservation_bytes = (uint64_t)initramfs_required_heap_bytes(
         (const uint8_t *)(uintptr_t)initrd_start,
         (uint32_t)(initrd_end - initrd_start));
-    if (heap_reservation_bytes < (uint64_t)EARLY_HEAP_SIZE) {
-        heap_reservation_bytes = (uint64_t)EARLY_HEAP_SIZE;
+    {
+        uint64_t provider_heap_bytes = (uint64_t)EARLY_HEAP_SIZE
+            + (uint64_t)ZACLR_ROOT_PROVIDER_HEAP_BYTES;
+        if (heap_reservation_bytes < provider_heap_bytes) {
+            heap_reservation_bytes = provider_heap_bytes;
+        }
     }
 
     pmm_reserve_until((uint64_t)(uintptr_t)&kernel_end + heap_reservation_bytes);

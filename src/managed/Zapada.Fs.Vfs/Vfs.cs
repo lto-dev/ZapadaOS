@@ -89,7 +89,18 @@ public static class Vfs
     /// </summary>
     public static int Open(string path)
     {
+        return Open(path, FileAccessIntent.ReadOnly);
+    }
+
+    /// <summary>
+    /// Open a file by absolute path with an explicit access intent.
+    /// </summary>
+    public static int Open(string path, int accessIntent)
+    {
         string localPath;
+
+        if (accessIntent != FileAccessIntent.ReadOnly && accessIntent != FileAccessIntent.ReadWrite)
+            return StorageStatus.InvalidArgument;
 
         if (!s_initialized)
         {
@@ -139,7 +150,7 @@ public static class Vfs
             return nodeHandle;
         }
 
-        int token = volume.Open(nodeHandle, FileAccessIntent.ReadOnly);
+        int token = volume.Open(nodeHandle, accessIntent);
         if (token < 0)
         {
             Console.Write("[VFS] Open.volume-open-failed\n");
@@ -154,7 +165,7 @@ public static class Vfs
             size = (int)facts.Size;
         }
 
-        int fd = FdTable.Alloc(slot, token, size);
+        int fd = FdTable.Alloc(slot, token, size, accessIntent);
         if (fd < 0)
         {
             Console.Write("[VFS] Open.alloc-fd-failed\n");
@@ -210,6 +221,43 @@ public static class Vfs
         int bytesRead = volume.Read(token, buffer, offset, count);
 
         return bytesRead;
+    }
+
+    public static int Size(int fd)
+    {
+        if (!FdTable.IsOpen(fd))
+            return StorageStatus.InvalidArgument;
+
+        return FdTable.Size(fd);
+    }
+
+    /// <summary>
+    /// Write from a managed byte array to an open file descriptor.
+    /// </summary>
+    public static int Write(int fd, byte[] buffer, int offset, int count)
+    {
+        if (!FdTable.IsOpen(fd))
+            return StorageStatus.InvalidArgument;
+
+        if (FdTable.AccessIntent(fd) != FileAccessIntent.ReadWrite)
+            return StorageStatus.PermissionDenied;
+
+        if (buffer == null || offset < 0 || count < 0)
+            return StorageStatus.InvalidArgument;
+
+        if (offset + count > buffer.Length)
+            return StorageStatus.InvalidArgument;
+
+        if (count == 0)
+            return 0;
+
+        int slot = FdTable.MountSlot(fd);
+        MountedVolume? volume = MountTable.GetVolume(slot);
+        if (volume == null)
+            return StorageStatus.NotMounted;
+
+        int token = FdTable.VolumeToken(fd);
+        return volume.Write(token, buffer, offset, count);
     }
 
     public static int List(string path)

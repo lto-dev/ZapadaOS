@@ -24,6 +24,10 @@ struct zaclr_process_manager {
 struct zaclr_result zaclr_process_manager_initialize(struct zaclr_process_manager* manager);
 struct zaclr_result zaclr_process_manager_create_boot_process(struct zaclr_process_manager* manager,
                                                               struct zaclr_process* process);
+struct zaclr_result zaclr_process_manager_create_launch(struct zaclr_process_manager* manager,
+                                                        const struct zaclr_launch_request* request,
+                                                        struct zaclr_assembly_source* source,
+                                                        struct zaclr_launch_state* launch_state);
 struct zaclr_result zaclr_process_manager_create_boot_launch(struct zaclr_process_manager* manager,
                                                              const struct zaclr_launch_request* request,
                                                              struct zaclr_launch_state* launch_state);

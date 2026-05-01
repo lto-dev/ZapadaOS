@@ -1,3 +1,5 @@
+using System;
+
 namespace Zapada.Storage;
 
 public sealed class DevFsVolume : MountedVolume
@@ -91,13 +93,13 @@ public sealed class DevFsVolume : MountedVolume
 
         if (accessIntent == FileAccessIntent.ReadOnly)
         {
-            if (node.Kind == DeviceKind.Null || node.Kind == DeviceKind.Zero || node.Kind == DeviceKind.Random)
+            if (node.Kind == DeviceKind.Null || node.Kind == DeviceKind.Zero || node.Kind == DeviceKind.Random || node.Kind == DeviceKind.Console)
                 return nodeHandle;
 
             return StorageStatus.NotSupported;
         }
 
-        if (accessIntent == FileAccessIntent.ReadWrite && node.Kind == DeviceKind.Null)
+        if (accessIntent == FileAccessIntent.ReadWrite && (node.Kind == DeviceKind.Null || node.Kind == DeviceKind.Console))
             return nodeHandle;
 
         return StorageStatus.PermissionDenied;
@@ -129,6 +131,35 @@ public sealed class DevFsVolume : MountedVolume
         if (node.Kind == DeviceKind.Random)
             return EntropyService.FillFromDevice(node.TargetHandle, buffer, offset, count);
 
+        if (node.Kind == DeviceKind.Console)
+            return ReadConsole(buffer, offset, count);
+
+        return StorageStatus.NotSupported;
+    }
+
+    public override int Write(int fileToken, byte[] buffer, int offset, int count)
+    {
+        if (buffer == null || offset < 0 || count < 0 || offset + count > buffer.Length)
+            return StorageStatus.InvalidArgument;
+
+        if (fileToken <= 0)
+            return StorageStatus.InvalidArgument;
+
+        DeviceNode? node = DeviceRegistry.Get(fileToken - 1);
+        if (node == null)
+            return StorageStatus.NotFound;
+
+        if (node.Kind == DeviceKind.Null)
+            return count;
+
+        if (node.Kind == DeviceKind.Console)
+        {
+            for (int i = 0; i < count; i++)
+                WriteConsoleByte(buffer[offset + i] & 0xFF);
+
+            return count;
+        }
+
         return StorageStatus.NotSupported;
     }
 
@@ -151,5 +182,30 @@ public sealed class DevFsVolume : MountedVolume
             return 2;
 
         return 0;
+    }
+
+    private static int ReadConsole(byte[] buffer, int offset, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            int value = Console.Read();
+            if (value < 0)
+                return i;
+
+            buffer[offset + i] = (byte)(value & 0xFF);
+        }
+
+        return count;
+    }
+
+    private static void WriteConsoleByte(int value)
+    {
+        if (value == 9 || value == 10 || value == 13 || value == 8 || value == 127 || (value >= 32 && value <= 126))
+        {
+            Console.Write((char)value);
+            return;
+        }
+
+        Console.Write('?');
     }
 }

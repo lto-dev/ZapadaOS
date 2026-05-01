@@ -21,6 +21,13 @@ public static class ShellHost
         RunBootSmokeCommand("block");
         RunBootSmokeCommand("partitions");
         RunBootSmokeCommand("ls /");
+        RunBootSmokeCommand("ls /boot");
+        RunBootSmokeCommand("ls /boot/zapada");
+        RunBootSmokeCommand("ls /lib");
+        RunBootSmokeCommand("ls /lib/dotnet");
+        RunBootSmokeCommand("ls /lib/zapada");
+        RunBootSmokeCommand("ls /bin");
+        RunBootSmokeCommand("ls /sbin");
         RunBootSmokeCommand("ls /mnt/c");
         RunBootSmokeCommand("ls /mnt/d");
         RunBootSmokeCommand("ls /mnt/u");
@@ -30,6 +37,7 @@ public static class ShellHost
         RunBootSmokeCommand("cat /proc/drivers");
         RunBootSmokeCommand("entropy");
         RunBootSmokeCommand("cat /etc/fstab");
+        RunBootSmokeCommand("cat /etc/minid.conf");
         Console.Write("[Gate] Phase-Shell\n");
         PrintPrompt();
         Console.Write("\n");

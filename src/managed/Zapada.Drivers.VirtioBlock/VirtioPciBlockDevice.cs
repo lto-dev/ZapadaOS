@@ -5,6 +5,8 @@ namespace Zapada.Drivers;
 
 internal sealed class VirtioPciBlockDevice : BlockDevice
 {
+    private const bool EnableTransferDiagnostics = false;
+
     private readonly BlockDeviceInfo _info = new BlockDeviceInfo();
     private VirtioPciRegions _regions;
     private DmaBuffer _descriptorBuffer;
@@ -124,13 +126,17 @@ internal sealed class VirtioPciBlockDevice : BlockDevice
         if (lba < 0 || (_info.SectorCount > 0 && lba + sectorCount > _info.SectorCount))
             return StorageStatus.InvalidArgument;
 
-        ClearRequestBuffers(byteCount);
+        LogTransferCheckpoint("transfer-begin", requestType, lba, sectorCount, _lastUsedIndex, 0);
+        ClearRequestBuffers();
         WriteHeader(requestType, lba);
         if (requestType == VirtioConstants.BlockRequestOut)
         {
             int copyRc = _dataBuffer.CopyFrom(0, buffer, bufferOffset, byteCount);
             if (copyRc != DriverHal.StatusSuccess)
+            {
+                LogTransferCheckpoint("transfer-copy-from-failed", requestType, lba, sectorCount, _lastUsedIndex, copyRc);
                 return StorageStatus.IoError;
+            }
         }
 
         int flags = requestType == VirtioConstants.BlockRequestIn ? VirtioConstants.DescriptorFlagWrite | VirtioConstants.DescriptorFlagNext : VirtioConstants.DescriptorFlagNext;
@@ -139,21 +145,29 @@ internal sealed class VirtioPciBlockDevice : BlockDevice
         WriteDescriptor(2, _statusBuffer.PhysicalAddress, VirtioConstants.RequestStatusBytes, VirtioConstants.DescriptorFlagWrite, 0);
 
         int expectedUsed = _lastUsedIndex + 1;
+        LogTransferCheckpoint("transfer-submit", requestType, lba, sectorCount, expectedUsed, 0);
         SubmitDescriptor(0);
+        LogTransferCheckpoint("transfer-poll-call", requestType, lba, sectorCount, expectedUsed, 0);
         int usedId = PollUsed(expectedUsed);
+        LogTransferCheckpoint("transfer-poll-ret", requestType, lba, sectorCount, expectedUsed, usedId);
         if (usedId != 0)
             return StorageStatus.IoError;
 
-        if (_statusBuffer.Read8(0) != 0)
+        int status = _statusBuffer.Read8(0);
+        LogTransferCheckpoint("transfer-status", requestType, lba, sectorCount, expectedUsed, status);
+        if (status != 0)
             return StorageStatus.IoError;
 
         if (requestType == VirtioConstants.BlockRequestIn)
         {
+            LogTransferCheckpoint("transfer-copy-to-call", requestType, lba, sectorCount, expectedUsed, 0);
             int copyRc = _dataBuffer.CopyTo(0, buffer, bufferOffset, byteCount);
+            LogTransferCheckpoint("transfer-copy-to-ret", requestType, lba, sectorCount, expectedUsed, copyRc);
             if (copyRc != DriverHal.StatusSuccess)
                 return StorageStatus.IoError;
         }
 
+        LogTransferCheckpoint("transfer-end", requestType, lba, sectorCount, expectedUsed, sectorCount);
         return sectorCount;
     }
 
@@ -179,7 +193,37 @@ internal sealed class VirtioPciBlockDevice : BlockDevice
             }
         }
 
+        System.Console.Write("[VirtioPciBlockDevice] poll-timeout expectedUsed=");
+        System.Console.Write(expectedUsed);
+        System.Console.Write(" lastUsed=");
+        System.Console.Write(_lastUsedIndex);
+        System.Console.Write("\n");
         return -1;
+    }
+
+    private static void LogTransferCheckpoint(string phase, int requestType, long lba, int sectorCount, int usedIndex, int result)
+    {
+        if (!EnableTransferDiagnostics)
+            return;
+
+        if (lba < 4096
+            || (lba >= 22000L && lba <= 28000L)
+            || (lba % 512) == 0)
+        {
+            System.Console.Write("[VirtioPciBlockDevice] ");
+            System.Console.Write(phase);
+            System.Console.Write(" type=");
+            System.Console.Write(requestType);
+            System.Console.Write(" lba=");
+            System.Console.Write(lba);
+            System.Console.Write(" sectors=");
+            System.Console.Write(sectorCount);
+            System.Console.Write(" used=");
+            System.Console.Write(usedIndex);
+            System.Console.Write(" result=");
+            System.Console.Write(result);
+            System.Console.Write("\n");
+        }
     }
 
     private void NotifyQueue()
@@ -206,14 +250,12 @@ internal sealed class VirtioPciBlockDevice : BlockDevice
         _descriptorBuffer.Write16(offset + 14, next);
     }
 
-    private void ClearRequestBuffers(int byteCount)
+    private void ClearRequestBuffers()
     {
         for (int i = 0; i < 3 * 16; i += 4)
             _descriptorBuffer.Write32(i, 0);
         for (int i = 0; i < 16; i += 4)
             _headerBuffer.Write32(i, 0);
-        for (int i = 0; i < byteCount; i += 4)
-            _dataBuffer.Write32(i, 0);
         _statusBuffer.Write8(0, 0xFF);
     }
 

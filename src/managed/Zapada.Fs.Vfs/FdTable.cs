@@ -1,3 +1,5 @@
+using Zapada.Storage;
+
 namespace Zapada.Fs.Vfs;
 
 /// <summary>
@@ -16,6 +18,7 @@ internal static class FdTable
     private static int[]  s_volumeToken;
     private static int[]  s_curOffset;
     private static int[]  s_size;
+    private static int[]  s_accessIntent;
     private static bool[] s_open;
 
     /// <summary>
@@ -29,6 +32,7 @@ internal static class FdTable
         s_volumeToken  = new int[MaxFds];
         s_curOffset    = new int[MaxFds];
         s_size         = new int[MaxFds];
+        s_accessIntent = new int[MaxFds];
         s_open         = new bool[MaxFds];
     }
 
@@ -36,6 +40,14 @@ internal static class FdTable
     /// Allocate a new file descriptor. Returns the fd index, or -1 if none available.
     /// </summary>
     public static int Alloc(int mountSlot, int volumeToken, int size)
+    {
+        return Alloc(mountSlot, volumeToken, size, FileAccessIntent.ReadOnly);
+    }
+
+    /// <summary>
+    /// Allocate a new file descriptor with explicit access intent.
+    /// </summary>
+    public static int Alloc(int mountSlot, int volumeToken, int size, int accessIntent)
     {
         for (int i = 0; i < MaxFds; i++)
         {
@@ -46,6 +58,7 @@ internal static class FdTable
                 s_volumeToken[i]   = volumeToken;
                 s_curOffset[i]     = 0;
                 s_size[i]          = size;
+                s_accessIntent[i]  = accessIntent;
                 return i;
             }
         }
@@ -67,6 +80,7 @@ internal static class FdTable
     public static int VolumeToken(int fd)   => IsOpen(fd) ? s_volumeToken[fd] : -1;
     public static int CurOffset(int fd)     => IsOpen(fd) ? s_curOffset[fd]   : -1;
     public static int Size(int fd)          => IsOpen(fd) ? s_size[fd]        : -1;
+    public static int AccessIntent(int fd)  => IsOpen(fd) ? s_accessIntent[fd] : -1;
 
     public static void SetCurOffset(int fd, int offset)
     {

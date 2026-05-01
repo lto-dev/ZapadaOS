@@ -4,6 +4,7 @@
 #include <kernel/zaclr/heap/zaclr_array.h>
 
 extern "C" {
+#include <kernel/console.h>
 #include <kernel/ipc/ipc.h>
 #include <kernel/irq/irq_router.h>
 #include <kernel/mm/pmm.h>
@@ -51,6 +52,23 @@ namespace
     static const uint32_t dma_frame_size = 4096u;
     static const uint32_t max_dma_buffer_slots = 64u;
     static dma_buffer_slot s_dma_buffer_slots[max_dma_buffer_slots];
+
+    static void log_i4_arg_failure(const char* method_name, struct zaclr_native_call_frame* frame, uint32_t index)
+    {
+        const struct zaclr_stack_value* arg = zaclr_native_call_frame_arg(frame, index);
+
+        console_write("[DriverHal] ");
+        console_write(method_name != nullptr ? method_name : "<unknown>");
+        console_write(" arg");
+        console_write_dec((uint64_t)index);
+        console_write(" invalid count=");
+        console_write_dec((uint64_t)zaclr_native_call_frame_argument_count(frame));
+        console_write(" kind=");
+        console_write_dec((uint64_t)(arg != nullptr ? arg->kind : 255u));
+        console_write(" raw=");
+        console_write_hex64(arg != nullptr ? (uint64_t)arg->data.raw : 0u);
+        console_write("\n");
+    }
 
     static int32_t alloc_buffer_slot(void* ptr, uint32_t size)
     {
@@ -824,11 +842,25 @@ struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::MmioRegionWrite8_
     int32_t offset;
     int32_t value;
     struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
-    if (status.status != ZACLR_STATUS_OK) return status;
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        log_i4_arg_failure("MmioRegionWrite8", &frame, 0u);
+        return status;
+    }
+
     status = zaclr_native_call_frame_arg_i4(&frame, 1u, &offset);
-    if (status.status != ZACLR_STATUS_OK) return status;
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        log_i4_arg_failure("MmioRegionWrite8", &frame, 1u);
+        return status;
+    }
+
     status = zaclr_native_call_frame_arg_i4(&frame, 2u, &value);
-    if (status.status != ZACLR_STATUS_OK) return status;
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        log_i4_arg_failure("MmioRegionWrite8", &frame, 2u);
+        return status;
+    }
 
     mmio_region_slot* slot = get_mmio_region_slot(handle);
     if (!validate_mmio_access(slot, offset, 1u, 1u))
@@ -1124,11 +1156,25 @@ struct zaclr_result zaclr_native_Zapada_Drivers_Hal_DriverHal::DmaBufferWrite8__
     int32_t offset;
     int32_t value;
     struct zaclr_result status = zaclr_native_call_frame_arg_i4(&frame, 0u, &handle);
-    if (status.status != ZACLR_STATUS_OK) return status;
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        log_i4_arg_failure("DmaBufferWrite8", &frame, 0u);
+        return status;
+    }
+
     status = zaclr_native_call_frame_arg_i4(&frame, 1u, &offset);
-    if (status.status != ZACLR_STATUS_OK) return status;
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        log_i4_arg_failure("DmaBufferWrite8", &frame, 1u);
+        return status;
+    }
+
     status = zaclr_native_call_frame_arg_i4(&frame, 2u, &value);
-    if (status.status != ZACLR_STATUS_OK) return status;
+    if (status.status != ZACLR_STATUS_OK)
+    {
+        log_i4_arg_failure("DmaBufferWrite8", &frame, 2u);
+        return status;
+    }
 
     dma_buffer_slot* slot = get_dma_buffer_slot(handle);
     if (!validate_dma_access(slot, offset, 1u, 1u))

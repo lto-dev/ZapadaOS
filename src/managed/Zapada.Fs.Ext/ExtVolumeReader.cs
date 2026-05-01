@@ -4,6 +4,12 @@ namespace Zapada.Fs.Ext;
 
 public sealed class ExtVolumeReader
 {
+    private const bool EnableReadDiagnostics = false;
+    private const long DiagnosticFileReadWindowStart = 2L * 1024L * 1024L;
+    private const long DiagnosticFileReadWindowEnd = 3L * 1024L * 1024L;
+    private const long DiagnosticPhysicalBlockStart = 2500L;
+    private const long DiagnosticPhysicalBlockEnd = 3300L;
+
     private PartitionView _partition = null!;
     private ExtSuperBlock _superBlock = null!;
 
@@ -48,7 +54,9 @@ public sealed class ExtVolumeReader
         long byteOffset = blockNumber * (long)_superBlock.BlockSize;
         long lba = byteOffset / 512L;
         int sectorCount = _superBlock.BlockSize / 512;
+        LogBlockCheckpoint("block-read-call", blockNumber, lba, sectorCount, 0);
         int rc = _partition.ReadSectors(lba, sectorCount, buffer, bufferOffset);
+        LogBlockCheckpoint("block-read-ret", blockNumber, lba, sectorCount, rc);
         if (rc < 0)
             return StorageStatus.IoError;
 
@@ -171,28 +179,84 @@ public sealed class ExtVolumeReader
         if (count > remainingFileBytes)
             count = (int)remainingFileBytes;
 
-        byte[] block = new byte[_superBlock.BlockSize];
+        int blockSize = _superBlock.BlockSize;
+        int sectorsPerBlock = blockSize / 512;
         int written = 0;
 
         while (written < count)
         {
             long fileOffset = absoluteOffset + written;
-            long logicalBlock = fileOffset / _superBlock.BlockSize;
-            int blockOffset = (int)(fileOffset % _superBlock.BlockSize);
+            long logicalBlock = fileOffset / blockSize;
+            int blockOffset = (int)(fileOffset % blockSize);
 
-            int readRc = ReadMappedBlock(inode, logicalBlock, block);
-            if (readRc != StorageStatus.Ok)
-                return written > 0 ? written : readRc;
+            long physicalBlock = MapLogicalBlock(inode, logicalBlock);
+            if (physicalBlock < 0)
+                return written > 0 ? written : (int)physicalBlock;
 
-            int available = _superBlock.BlockSize - blockOffset;
-            int wanted = count - written;
-            if (wanted > available)
-                wanted = available;
+            if (physicalBlock == 0)
+            {
+                int zeroAvailable = blockSize - blockOffset;
+                int zeroWanted = count - written;
+                if (zeroWanted > zeroAvailable)
+                    zeroWanted = zeroAvailable;
+                for (int i = 0; i < zeroWanted; i++)
+                    buffer[offset + written + i] = 0;
+                written += zeroWanted;
+                continue;
+            }
 
-            for (int i = 0; i < wanted; i++)
-                buffer[offset + written + i] = block[blockOffset + i];
+            if (blockOffset != 0)
+            {
+                byte[] tempBlock = new byte[blockSize];
+                int readRc = ReadBlock(physicalBlock, tempBlock, 0);
+                if (readRc != StorageStatus.Ok)
+                    return written > 0 ? written : readRc;
 
-            written += wanted;
+                int available = blockSize - blockOffset;
+                int wanted = count - written;
+                if (wanted > available)
+                    wanted = available;
+                for (int i = 0; i < wanted; i++)
+                    buffer[offset + written + i] = tempBlock[blockOffset + i];
+                written += wanted;
+                continue;
+            }
+
+            int remaining = count - written;
+            if (remaining < blockSize)
+            {
+                byte[] tempBlock = new byte[blockSize];
+                int readRc = ReadBlock(physicalBlock, tempBlock, 0);
+                if (readRc != StorageStatus.Ok)
+                    return written > 0 ? written : readRc;
+                for (int i = 0; i < remaining; i++)
+                    buffer[offset + written + i] = tempBlock[i];
+                written += remaining;
+                continue;
+            }
+
+            int maxBlocks = remaining / blockSize;
+
+            int contiguous = 1;
+            while (contiguous < maxBlocks)
+            {
+                long nextPhysical = MapLogicalBlock(inode, logicalBlock + contiguous);
+                if (nextPhysical != physicalBlock + contiguous)
+                    break;
+                contiguous++;
+            }
+
+            int totalSectors = contiguous * sectorsPerBlock;
+            int totalBytes = contiguous * blockSize;
+            if (totalBytes > remaining)
+                totalBytes = remaining;
+
+            long lba = physicalBlock * (long)sectorsPerBlock;
+            int rc = _partition.ReadSectors(lba, totalSectors, buffer, offset + written);
+            if (rc < 0)
+                return written > 0 ? written : StorageStatus.IoError;
+
+            written += totalBytes;
         }
 
         return written;
@@ -207,6 +271,50 @@ public sealed class ExtVolumeReader
             return MapExtentNode(inode.BlockMap, 0, logicalBlock, 0);
 
         return MapClassicBlock(inode, logicalBlock);
+    }
+
+    private static void LogFileCheckpoint(string phase, long fileOffset, int count, long logicalBlock, int result)
+    {
+        if (!EnableReadDiagnostics)
+            return;
+
+        if ((fileOffset >= DiagnosticFileReadWindowStart && fileOffset <= DiagnosticFileReadWindowEnd)
+            || (logicalBlock % 8) == 0)
+        {
+            System.Console.Write("[ExtVolumeReader] ");
+            System.Console.Write(phase);
+            System.Console.Write(" fileOffset=");
+            System.Console.Write(fileOffset);
+            System.Console.Write(" count=");
+            System.Console.Write(count);
+            System.Console.Write(" logicalBlock=");
+            System.Console.Write(logicalBlock);
+            System.Console.Write(" result=");
+            System.Console.Write(result);
+            System.Console.Write("\n");
+        }
+    }
+
+    private static void LogBlockCheckpoint(string phase, long blockNumber, long lba, int sectorCount, int result)
+    {
+        if (!EnableReadDiagnostics)
+            return;
+
+        if ((blockNumber >= DiagnosticPhysicalBlockStart && blockNumber <= DiagnosticPhysicalBlockEnd)
+            || (blockNumber % 64) == 0)
+        {
+            System.Console.Write("[ExtVolumeReader] ");
+            System.Console.Write(phase);
+            System.Console.Write(" block=");
+            System.Console.Write(blockNumber);
+            System.Console.Write(" lba=");
+            System.Console.Write(lba);
+            System.Console.Write(" sectors=");
+            System.Console.Write(sectorCount);
+            System.Console.Write(" result=");
+            System.Console.Write(result);
+            System.Console.Write("\n");
+        }
     }
 
     private int ReadGroupDescriptor(int group, ExtBlockGroupDescriptor descriptor)
